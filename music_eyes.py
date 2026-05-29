@@ -1,6 +1,17 @@
 import sys
-import importlib
-sys.modules['imp'] = importlib  # Tricks TensorFlow into using the modern library
+import importlib.util
+
+# --- The "Smart" Python 3.13 Hack ---
+class FakeImp:
+    @staticmethod
+    def find_module(name):
+        # Tell flatbuffers if the module exists without crashing
+        if importlib.util.find_spec(name) is None:
+            raise ImportError(f"No module named {name}")
+        return None
+
+sys.modules['imp'] = FakeImp()
+# ------------------------------------
 
 import soundcard as sc
 import numpy as np
