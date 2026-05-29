@@ -1,3 +1,7 @@
+import sys
+import importlib
+sys.modules['imp'] = importlib  # Tricks TensorFlow into using the modern library
+
 import soundcard as sc
 import numpy as np
 import aubio
