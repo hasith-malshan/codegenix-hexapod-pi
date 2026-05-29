@@ -22,6 +22,7 @@ import tensorflow_hub as hub
 import threading
 import time
 import csv
+from scipy.signal import butter, lfilter
 
 # Display & Graphics Libraries
 import board
@@ -29,11 +30,36 @@ import busio
 import digitalio
 from PIL import Image, ImageDraw
 
-# Legact PIL-compatible SPI display driver
+# Legacy PIL-compatible SPI display driver
 from adafruit_rgb_display import ili9341 as ili9341
 
 # ==========================================
-# 1. HARDWARE WIRING (From your config)
+# 1. AUDIO CONFIGURATION
+# ==========================================
+RATE = 16000
+CHUNK = 256  # 16ms of audio for high-resolution tracking
+
+
+# ==========================================
+# 2. VOCAL BANDPASS FILTER (300Hz - 3000Hz)
+# ==========================================
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+
+def butter_bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=4):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    # Scipy outputs float64, Aubio requires float32 C-contiguous arrays
+    return np.ascontiguousarray(y, dtype=np.float32)
+
+
+# ==========================================
+# 3. HARDWARE WIRING (From your config)
 # ==========================================
 DISPLAY_CS_PIN = board.CE0  # GPIO8
 DISPLAY_DC_PIN = board.D24  # GPIO24
@@ -41,7 +67,7 @@ DISPLAY_RST_PIN = board.D25  # GPIO25
 
 
 # ==========================================
-# 2. GLOBAL STATE (Shared between AI & Display)
+# 4. GLOBAL STATE (Shared between AI & Display)
 # ==========================================
 class RobotState:
     def __init__(self):
@@ -55,7 +81,7 @@ class RobotState:
 state = RobotState()
 
 # ==========================================
-# 3. SETUP YAMNET (AI AUDIO CLASSIFIER)
+# 5. SETUP YAMNET (AI AUDIO CLASSIFIER)
 # ==========================================
 print("Loading YAMNet AI Model... (This takes a moment)")
 yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
@@ -73,14 +99,15 @@ def get_class_names():
 
 YAMNET_CLASSES = get_class_names()
 
-RATE = 16000
-CHUNK = 256
 BUFFER_LENGTH = RATE * 3
 audio_buffer = np.zeros(BUFFER_LENGTH, dtype=np.float32)
 
+# We will use a list to store the exact timestamps of every detected syllable
+syllable_timestamps = []
+
 
 # ==========================================
-# 4. BACKGROUND THREADS: Audio Analysis
+# 6. BACKGROUND THREADS: Audio Analysis
 # ==========================================
 def run_yamnet_periodically():
     while True:
@@ -95,8 +122,13 @@ def run_yamnet_periodically():
 
 
 def audio_listener():
-    global audio_buffer
+    global audio_buffer, syllable_timestamps
     aubio_tempo = aubio.tempo("specflux", 1024, CHUNK, RATE)
+    aubio_tempo.set_threshold(0.6)  # Ignore light instrument plucks
+
+    # Syllable/vocal onset tracker
+    aubio_syllable = aubio.onset("mkl", 1024, CHUNK, RATE)
+    aubio_syllable.set_threshold(0.3)
 
     # Listen to the Pi's internal Bluetooth Audio loopback
     default_speaker = sc.default_speaker()
@@ -107,9 +139,22 @@ def audio_listener():
             raw_data = recorder.record(numframes=CHUNK)
             audio_chunk = raw_data.flatten().astype(np.float32)
 
-            # Feed rolling buffer
+            # Feed rolling buffer (for YAMNet)
             audio_buffer = np.roll(audio_buffer, -CHUNK)
             audio_buffer[-CHUNK:] = audio_chunk
+
+            # Filter vocal frequencies
+            vocal_audio = butter_bandpass_filter(audio_chunk)
+
+            # Count Syllables
+            current_time = time.time()
+            is_syllable = aubio_syllable(vocal_audio)
+            if is_syllable[0]:
+                syllable_timestamps.append(current_time)
+
+            # Keep only last 3 seconds of syllables
+            syllable_timestamps = [t for t in syllable_timestamps if current_time - t <= 3.0]
+            syllables_in_last_3_sec = len(syllable_timestamps)
 
             # Detect Beats
             is_beat = aubio_tempo(audio_chunk)
@@ -117,20 +162,49 @@ def audio_listener():
                 bpm = aubio_tempo.get_bpm()
 
                 with state.lock:
+                    genre = state.genre
+
                     # Fix Half-Time Error for aggressive genres
                     fast_genres = ["Electronic", "Dance", "Rock", "Metal", "Pop"]
-                    if 40 < bpm < 90 and any(g in state.genre for g in fast_genres):
+                    if 40 < bpm < 90 and any(g in genre for g in fast_genres):
                         bpm *= 2
 
                     state.bpm = bpm
                     state.beat_hit = True  # Trigger eye pulse
 
-                    if bpm > 110:
-                        state.music_speed = "FAST"
-                    elif 0 < bpm <= 110 and "Music" in state.genre:
-                        state.music_speed = "SLOW"
+                    # Categories that trigger the Vocal/Syllable Override
+                    vocal_genres = ["Acoustic", "Vocal", "Speech", "Choir", "Folk", "Singer",
+                                    "Plucked string instrument"]
+
+                    # 1. THE VOCAL OVERRIDE LOGIC
+                    if any(g in genre for g in vocal_genres) or syllables_in_last_3_sec > 5:
+                        if syllables_in_last_3_sec >= 12:
+                            state.music_speed = "FAST"
+                            dance_style = "FAST AGGRESSIVE IK MOVES"
+                            reasoning = f"Rapid Speech ({syllables_in_last_3_sec} syll/3s)"
+                        else:
+                            state.music_speed = "SLOW"
+                            dance_style = "SLOW SWAYING IK MOVES"
+                            reasoning = f"Slow Vocals ({syllables_in_last_3_sec} syll/3s)"
+
+                    # 2. THE STANDARD BPM LOGIC
                     else:
-                        state.music_speed = "IDLE"
+                        if bpm > 110:
+                            state.music_speed = "FAST"
+                            dance_style = "FAST AGGRESSIVE IK MOVES"
+                            reasoning = "BPM Fast"
+                        elif 0 < bpm <= 110 and "Music" in genre:
+                            state.music_speed = "SLOW"
+                            dance_style = "SLOW SWAYING IK MOVES"
+                            reasoning = "BPM Slow"
+                        else:
+                            state.music_speed = "IDLE"
+                            dance_style = "STOP DANCING - IDLE"
+                            reasoning = "No stable rhythm"
+
+                    # --> SINGLE-LINE CONSOLE OUTPUT: All telemetry packed into one clean line <--
+                    print(
+                        f"🎵 [BEAT] BPM: {bpm:5.1f} | Syllables: {syllables_in_last_3_sec:2d}/3s | AI: {genre:15.15} | CMD: {dance_style:24.24} | Reason: {reasoning}")
 
 
 ai_thread = threading.Thread(target=run_yamnet_periodically, daemon=True)
@@ -141,7 +215,7 @@ audio_thread.start()
 
 
 # ==========================================
-# 5. DISPLAY ENGINE (Cozmo/Vector Style Eyes)
+# 7. DISPLAY ENGINE (Cozmo/Vector Style Eyes)
 # ==========================================
 def init_display():
     spi = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
@@ -162,7 +236,6 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
     w = x1 - x0
     h = y1 - y0
 
-    # --> DYNAMIC RADIUS LIMITER: <--
     # Corner radius must never be larger than half the width or half the height of the shape
     r = min(corner_radius, w // 2, h // 2)
 
@@ -199,8 +272,6 @@ def display_loop():
 
         with state.lock:
             speed = state.music_speed
-            bpm = state.bpm
-            genre = state.genre
             beat_active = state.beat_hit
             state.beat_hit = False  # Reset beat immediately after reading
 
