@@ -1,14 +1,15 @@
 import sys
 import importlib.util
 
+
 # --- The "Smart" Python 3.13 Hack ---
 class FakeImp:
     @staticmethod
     def find_module(name):
-        # Tell flatbuffers if the module exists without crashing
         if importlib.util.find_spec(name) is None:
             raise ImportError(f"No module named {name}")
         return None
+
 
 sys.modules['imp'] = FakeImp()
 # ------------------------------------
@@ -27,7 +28,9 @@ import board
 import busio
 import digitalio
 from PIL import Image, ImageDraw
-import adafruit_ili9341
+
+# --> FIXED THIS IMPORT: Changed from adafruit_ili9341 to adafruit_rgb_display <--
+from adafruit_rgb_display import ili9341 as ili9341
 
 # ==========================================
 # 1. HARDWARE WIRING (From your config)
@@ -145,7 +148,12 @@ def init_display():
     cs_pin = digitalio.DigitalInOut(DISPLAY_CS_PIN)
     dc_pin = digitalio.DigitalInOut(DISPLAY_DC_PIN)
     rst_pin = digitalio.DigitalInOut(DISPLAY_RST_PIN)
-    disp = adafruit_ili9341.ILI9341(spi, cs=cs_pin, dc=dc_pin, rst=rst_pin, width=320, height=240)
+
+    # --> FIXED INITIALIZATION: Use rotation=90 for 320x240 landscape layout <--
+    disp = ili9341.ILI9341(
+        spi, cs=cs_pin, dc=dc_pin, rst=rst_pin,
+        rotation=90, baudrate=24000000
+    )
     return disp
 
 
@@ -162,11 +170,13 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 
 def display_loop():
     disp = init_display()
+
+    # 320x240 landscape dimensions
     width, height = 320, 240
 
     # Eye variables
     eye_width, eye_height = 70, 120
-    left_x, right_x = 70, 250
+    left_x, right_x = 90, 230
     center_y = 120
 
     blink_timer = time.time()
@@ -223,10 +233,7 @@ def display_loop():
                            right_x + eye_width_render // 2, center_y + current_h // 2],
                           corner_radius=20, fill=color)
 
-        # 6. Debug Text at the bottom (Optional, remove for clean face)
-        draw.text((10, 220), f"AI: {genre[:20]} | BPM: {bpm:.0f}", fill=(100, 100, 100))
-
-        # Push to screen
+        # Push to screen using PIL image method
         disp.image(img)
         time.sleep(0.03)  # Limit to ~30 FPS to save CPU
 
