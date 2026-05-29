@@ -29,7 +29,7 @@ import busio
 import digitalio
 from PIL import Image, ImageDraw
 
-# --> FIXED THIS IMPORT: Changed from adafruit_ili9341 to adafruit_rgb_display <--
+# Legact PIL-compatible SPI display driver
 from adafruit_rgb_display import ili9341 as ili9341
 
 # ==========================================
@@ -149,7 +149,6 @@ def init_display():
     dc_pin = digitalio.DigitalInOut(DISPLAY_DC_PIN)
     rst_pin = digitalio.DigitalInOut(DISPLAY_RST_PIN)
 
-    # --> FIXED INITIALIZATION: Use rotation=90 for 320x240 landscape layout <--
     disp = ili9341.ILI9341(
         spi, cs=cs_pin, dc=dc_pin, rst=rst_pin,
         rotation=90, baudrate=24000000
@@ -157,15 +156,27 @@ def init_display():
     return disp
 
 
-# Math function to draw thick rounded rectangles
+# Math function to draw thick rounded rectangles safely
 def draw_rounded_rect(draw, xy, corner_radius, fill):
     x0, y0, x1, y1 = xy
-    draw.rectangle([x0, y0 + corner_radius, x1, y1 - corner_radius], fill=fill)
-    draw.rectangle([x0 + corner_radius, y0, x1 - corner_radius, y1], fill=fill)
-    draw.pieslice([x0, y0, x0 + corner_radius * 2, y0 + corner_radius * 2], 180, 270, fill=fill)
-    draw.pieslice([x1 - corner_radius * 2, y1 - corner_radius * 2, x1, y1], 0, 90, fill=fill)
-    draw.pieslice([x0, y1 - corner_radius * 2, x0 + corner_radius * 2, y1], 90, 180, fill=fill)
-    draw.pieslice([x1 - corner_radius * 2, y0, x1, y0 + corner_radius * 2], 270, 360, fill=fill)
+    w = x1 - x0
+    h = y1 - y0
+
+    # --> DYNAMIC RADIUS LIMITER: <--
+    # Corner radius must never be larger than half the width or half the height of the shape
+    r = min(corner_radius, w // 2, h // 2)
+
+    # If the eye is completely shut/slit during a blink, draw a standard flat rectangle
+    if r <= 0:
+        draw.rectangle([x0, y0, x1, y1], fill=fill)
+        return
+
+    draw.rectangle([x0, y0 + r, x1, y1 - r], fill=fill)
+    draw.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
+    draw.pieslice([x0, y0, x0 + r * 2, y0 + r * 2], 180, 270, fill=fill)
+    draw.pieslice([x1 - r * 2, y1 - r * 2, x1, y1], 0, 90, fill=fill)
+    draw.pieslice([x0, y1 - r * 2, x0 + r * 2, y1], 90, 180, fill=fill)
+    draw.pieslice([x1 - r * 2, y0, x1, y0 + r * 2], 270, 360, fill=fill)
 
 
 def display_loop():
