@@ -76,7 +76,8 @@ class RobotState:
         self.genre = "Listening..."
         self.beat_hit = False
         self.music_speed = "IDLE"  # IDLE, SLOW, FAST, DANCE
-        self.voice_active = False  # NEW: Thread-safe tracking for voice commands
+        self.voice_active = False
+        self.command_detected_time = 0.0  # NEW: Tracks exact millisecond of command detection [2]
         self.lock = threading.Lock()
 
 
@@ -142,22 +143,34 @@ def process_voice_command(audio_bytes):
         print(f"🎤 [VOICE] Recognized: '{text}'")
 
         # Check for commands
+        matched = False
         if any(word in text for word in ["stop", "halt", "stand", "quiet"]):
             with state.lock:
                 state.music_speed = "IDLE"
                 state.genre = "CMD: STOPPED"
+                state.command_detected_time = time.time()  # Trigger success flash [2]
+            matched = True
         elif any(word in text for word in ["dance", "show me", "party"]):
             with state.lock:
                 state.music_speed = "DANCE"
                 state.genre = "CMD: PARTY MODE"
+                state.command_detected_time = time.time()  # Trigger success flash [2]
+            matched = True
         elif any(word in text for word in ["slow", "acoustic", "relax"]):
             with state.lock:
                 state.music_speed = "SLOW"
                 state.genre = "CMD: SLOW"
+                state.command_detected_time = time.time()  # Trigger success flash [2]
+            matched = True
         elif any(word in text for word in ["fast", "quick", "speed"]):
             with state.lock:
                 state.music_speed = "FAST"
                 state.genre = "CMD: FAST"
+                state.command_detected_time = time.time()  # Trigger success flash [2]
+            matched = True
+
+        if not matched:
+            print("🎤 [VOICE] Command did not match library.")
 
     except sr.UnknownValueError:
         print("🎤 [VOICE] Speech was unclear.")
@@ -343,25 +356,52 @@ def display_loop():
         with state.lock:
             speed = state.music_speed
             beat_active = state.beat_hit
-            voice_active = state.voice_active  # Read the active voice flag
+            voice_active = state.voice_active
+            cmd_time = state.command_detected_time
             state.beat_hit = False  # Reset beat immediately after reading
 
-        # --> NEW BACKGROUND LOGIC: Glowing dark forest green when listening <--
-        bg_color = (10, 35, 15) if voice_active else (0, 0, 0)
+        # Calculate time elapsed since a command was successfully detected
+        time_since_cmd = time.time() - cmd_time
+
+        # --> NEW BACKGROUND LOGIC: Burst white first, then glow blue, then listen green, then idle black [2] <--
+        if time_since_cmd < 0.25:
+            # 1. PURE WHITE FLASH immediately upon detection (lasts 250ms) [2]
+            bg_color = (255, 255, 255)
+        elif time_since_cmd < 1.0:
+            # 2. DEEP ELECTRIC BLUE GLOW for the next 750ms [2]
+            bg_color = (30, 30, 80)
+        elif voice_active:
+            # 3. DEEP FOREST GREEN when actively listening to voice
+            bg_color = (10, 35, 15)
+        else:
+            # 4. BLACK standard background
+            bg_color = (0, 0, 0)
+
         img = Image.new("RGB", (width, height), color=bg_color)
         draw = ImageDraw.Draw(img)
 
-        # Determine Eye Shape & Color
+        # Determine Eye Shape, Height, and Color
         current_h = eye_height
         color = (0, 255, 255)  # Default Cyan (IDLE)
+        center_y_render = center_y  # Normal eye vertical alignment
 
-        # --> NEW GRAPHICS STATES <--
-        if voice_active:
-            # Concentrating Neon-Green eyes when active voice detection is triggered
+        # --> NEW EYE SHAPES AND COLORS STATE MACHINE <--
+        if time_since_cmd < 0.25:
+            # 1. JET BLACK SILHOUETTE EYES during the white flash [2]
+            color = (0, 0, 0)
+            current_h = int(eye_height * 0.4)  # Flat happy squint [2]
+            center_y_render = center_y - 10  # Smile lift
+        elif time_since_cmd < 1.0:
+            # 2. ELECTRIC BLUE HAPPY SQUINT EYES during success confirmation [2]
+            color = (0, 191, 255)
+            current_h = int(eye_height * 0.4)  # Flat happy squint [2]
+            center_y_render = center_y - 10  # Smile lift
+        elif voice_active:
+            # 3. CONCENTRATING NEON-GREEN eyes when listening
             color = (0, 255, 100)
-            current_h = int(eye_height * 0.75)  # Slight focusing squint
+            current_h = int(eye_height * 0.75)  # Focused squint
         elif speed == "DANCE":
-            # Dynamic rainbow cycle for party mode
+            # 4. DYNAMIC RAINBOW CYCLE for active party mode
             hue = (time.time() * 2) % 1.0
             r_val, g_val, b_val = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
             color = (int(r_val * 255), int(g_val * 255), int(b_val * 255))
@@ -374,32 +414,34 @@ def display_loop():
             current_h = int(eye_height * 0.6)  # Squinting / Relaxed
 
         # 2. Beat Pulse Animation (Expand slightly exactly on the beat)
-        if beat_active and not voice_active:  # Skip beat pulse if listening to commands
+        # Disable beat pulsing during active listening or immediately after a command detection
+        if beat_active and not voice_active and time_since_cmd > 1.0:
             current_h += 30
             eye_width_render = eye_width + 10
         else:
             eye_width_render = eye_width
 
         # 3. Blinking Logic
+        # Disable blinking during active listening or immediately after command detection
         if time.time() - blink_timer > np.random.uniform(2.0, 5.0):
             is_blinking = True
             blink_timer = time.time()
 
-        if is_blinking and not voice_active:  # Don't blink while actively listening
+        if is_blinking and not voice_active and time_since_cmd > 1.0:
             current_h = 10  # Eyes close to slits
             if time.time() - blink_timer > 0.15:  # Blink lasts 150ms
                 is_blinking = False
 
         # 4. Draw Left Eye
         draw_rounded_rect(draw,
-                          [left_x - eye_width_render // 2, center_y - current_h // 2,
-                           left_x + eye_width_render // 2, center_y + current_h // 2],
+                          [left_x - eye_width_render // 2, center_y_render - current_h // 2,
+                           left_x + eye_width_render // 2, center_y_render + current_h // 2],
                           corner_radius=20, fill=color)
 
         # 5. Draw Right Eye
         draw_rounded_rect(draw,
-                          [right_x - eye_width_render // 2, center_y - current_h // 2,
-                           right_x + eye_width_render // 2, center_y + current_h // 2],
+                          [right_x - eye_width_render // 2, center_y_render - current_h // 2,
+                           right_x + eye_width_render // 2, center_y_render + current_h // 2],
                           corner_radius=20, fill=color)
 
         # Push to screen using PIL image method
