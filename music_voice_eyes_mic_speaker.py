@@ -1,5 +1,6 @@
 import sys
 import importlib.util
+import os  # NEW: Imported to run system-level volume commands
 
 
 # --- The "Smart" Python 3.13 Hack ---
@@ -125,12 +126,12 @@ def say_phrase_offline(text_to_say):
 
     def speak_worker():
         try:
-            # Initialize the TTS engine locally within the thread to avoid locking [2]
+            # Initialize the enlist locally within the thread to avoid locking [2]
             engine = pyttsx3.init()
 
             # Set properties (145 rate gives a clear, deliberate, sci-fi robot voice)
             engine.setProperty('rate', 145)
-            engine.setProperty('volume', 1.0)
+            engine.setProperty('volume', 1.0)  # Maximized digital volume
 
             print(f"🔊 [TTS] Robot saying: '{text_to_say}'")
             engine.say(text_to_say)
@@ -372,6 +373,14 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 
 
 def display_loop():
+    # --- AUTOMATIC VOLUME MAXIMIZER ---
+    # Automatically force the Pi's ALSA master volume, playbacks, and PulseAudio sinks to 100% on boot
+    print("🔊 Maximizing system-level volume outputs...")
+    os.system("amixer set Master 100% > /dev/null 2>&1")
+    os.system("amixer sset 'Playback' 100% > /dev/null 2>&1")
+    os.system("amixer sset 'Speaker' 100% > /dev/null 2>&1")
+    os.system("pactl set-sink-volume @DEFAULT_SINK@ 100% > /dev/null 2>&1")
+
     disp = init_display()
     width, height = 320, 240
 
