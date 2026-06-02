@@ -98,10 +98,11 @@ class RobotState:
         self.voice_active = False
         self.command_detected_time = 0.0
 
-        # --- NEW: 3-Second Window Averaging Variables ---
+        # --- IMPROVED: Faster 1.5-Second Window ---
         self.bpm_history = []
         self.last_dance_command_time = time.time()
-        self.voice_override_until = 0.0  # Time until music logic is allowed back
+        self.voice_override_until = 0.0
+        self.dance_window_seconds = 1.5  # REDUCED from 3.0
 
         self.lock = threading.Lock()
 
@@ -223,7 +224,7 @@ def process_voice_command(audio_bytes):
 
 
 # ==========================================
-# 6. AUDIO & 3-SECOND WINDOW LISTENER
+# 6. AUDIO & FASTER TRANSITION LISTENER
 # ==========================================
 def audio_listener():
     global audio_buffer, syllable_timestamps, voice_byte_buffer
@@ -280,16 +281,17 @@ def audio_listener():
                     state.beat_hit = True
                     state.bpm_history.append(bpm)
 
-            # --- THE 3-SECOND AVERAGING WINDOW FOR MUSIC DANCING ---
+            # --- IMPROVED: 1.5-SECOND WINDOW FOR FASTER BEAT SYNCING ---
             with state.lock:
-                # Check if it has been 3 seconds since we last evaluated the music
-                if current_time - state.last_dance_command_time >= 3.0:
+                window_size = state.dance_window_seconds
+                # Check if it has been N seconds since we last sent a dance command
+                if current_time - state.last_dance_command_time >= window_size:
 
                     # Ensure we are not currently locked out by a Voice Override
                     if current_time > state.voice_override_until and not state.voice_active:
 
                         if len(state.bpm_history) > 0:
-                            # Calculate the average BPM over the last 3 seconds
+                            # Calculate the average BPM over the window
                             avg_bpm = sum(state.bpm_history) / len(state.bpm_history)
                             vocal_genres = ["Acoustic", "Vocal", "Speech", "Choir", "Folk", "Singer"]
 
@@ -312,7 +314,7 @@ def audio_listener():
                             # Send the automated dance to ESP32
                             send_to_esp32(next_move)
 
-                        # Reset the 3-second window
+                        # Reset the window
                         state.last_dance_command_time = current_time
                         state.bpm_history.clear()
 
