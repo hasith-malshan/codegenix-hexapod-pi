@@ -22,7 +22,6 @@ import tensorflow_hub as hub
 import threading
 import time
 import csv
-import colorsys
 import speech_recognition as sr
 import pyttsx3
 from scipy.signal import butter, lfilter
@@ -36,451 +35,505 @@ from adafruit_rgb_display import ili9341 as ili9341
 # ==========================================
 # USB SERIAL CONNECTION
 # ==========================================
-print("🔌 Connecting to ESP32 over USB...")
+print("Connecting to ESP32 over USB...")
 try:
     esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    print("✅ Successfully connected to ESP32 on /dev/ttyUSB0")
+    print("Connected to ESP32 on /dev/ttyUSB0")
 except Exception as e:
-    print(f"❌ Failed to connect to ESP32. Error: {e}")
+    print(f"Failed to connect: {e}")
     esp32_serial = None
 
 def send_to_esp32(command):
     if esp32_serial and esp32_serial.is_open:
         try:
             esp32_serial.write((command + "\n").encode('utf-8'))
-            print(f"📡 Sent: {command}")
+            print(f"Sent: {command}")
         except Exception as e:
-            print(f"❌ Failed to send: {e}")
+            print(f"Send failed: {e}")
 
 # ==========================================
 # AUDIO CONFIG
 # ==========================================
-RATE = 16000
-CHUNK = 256
+RATE  = 16000
+CHUNK = 512   # Increased from 256: reduces CPU overhead per chunk
 
-def butter_bandpass(lowcut, highcut, fs, order=4):
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    b, a = butter(order, [low, high], btype='band')
+# Pre-compute filter coefficients once at startup.
+# Original code recomputed them every single chunk — wasted CPU.
+def _make_bandpass(lowcut, highcut, fs, order=4):
+    nyq  = 0.5 * fs
+    b, a = butter(order, [lowcut / nyq, highcut / nyq], btype='band')
     return b, a
 
-def butter_bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=4):
-    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
-    y = lfilter(b, a, data)
-    return np.ascontiguousarray(y, dtype=np.float32)
+_BP_B, _BP_A = _make_bandpass(300, 3400, RATE, order=4)
+
+def bandpass(data):
+    return np.ascontiguousarray(lfilter(_BP_B, _BP_A, data), dtype=np.float32)
 
 DISPLAY_CS_PIN = board.CE0
 DISPLAY_DC_PIN = board.D24
 DISPLAY_RST_PIN = board.D25
 
 # ==========================================
-# PROFESSIONAL STATE MANAGEMENT
+# 3-STAGE VOICE ACTIVITY DETECTOR
+# ==========================================
+# WHY THIS BEATS THE ORIGINAL SYLLABLE COUNTER:
+#
+# The original only measured energy (loudness). Music constantly exceeds that
+# threshold, causing false triggers. This VAD adds two more checks:
+#
+# 1. Zero Crossing Rate (ZCR): counts how many times the signal crosses zero
+#    per second. Human voice lives in a specific ZCR range (0.04 - 0.35).
+#    Bass-heavy music has very LOW ZCR. High-frequency hiss has very HIGH ZCR.
+#    Both get filtered out automatically.
+#
+# 2. Spectral centroid ratio: voice energy concentrates in 300-3400 Hz.
+#    Music spreads across the full spectrum. We compare energy in the voice
+#    band vs total energy — voice has a high ratio, music has a low ratio.
+#
+# 3. Confirmation window: requires CONFIRM_CHUNKS consecutive positive
+#    detections before firing. A single drum hit or bass drop passes
+#    the energy test but fails the confirmation window.
+#
+# TUNING GUIDE (adjust these if needed):
+#   ENERGY_MULTIPLIER — raise if music causes false triggers, lower if voice is missed
+#   ZCR_MIN / ZCR_MAX — widen if deep male voices are missed (lower ZCR_MIN to 0.02)
+#   CONFIRM_CHUNKS    — raise for noisy environments, lower for faster response
+#   SILENCE_CHUNKS    — raise if commands get cut off mid-word
+
+class VAD:
+    NOISE_ALPHA       = 0.97   # Noise floor adaptation speed (higher = slower)
+    ENERGY_MULTIPLIER = 3.5    # Voice must be this many times above noise floor
+    ZCR_MIN           = 0.04   # Minimum ZCR for voice (raise to 0.06 for noisy rooms)
+    ZCR_MAX           = 0.35   # Maximum ZCR for voice
+    BAND_RATIO_MIN    = 0.55   # Minimum fraction of energy in voice band (300-3400Hz)
+    CONFIRM_CHUNKS    = 5      # Consecutive voice chunks before triggering
+    SILENCE_CHUNKS    = 18     # Consecutive silent chunks = end of speech
+
+    def __init__(self):
+        self.noise_floor         = 0.02
+        self.consecutive_voice   = 0
+        self.consecutive_silence = 0
+        self.in_speech           = False
+
+    def _zcr(self, chunk):
+        return np.sum(np.diff(np.sign(chunk)) != 0) / len(chunk)
+
+    def _band_ratio(self, chunk):
+        # Ratio of voice-band energy to total energy.
+        # Cheap FFT-based check — reuses numpy's rfft.
+        spec      = np.abs(np.fft.rfft(chunk))
+        freqs     = np.fft.rfftfreq(len(chunk), 1.0 / RATE)
+        voice_idx = (freqs >= 300) & (freqs <= 3400)
+        total_e   = np.sum(spec ** 2)
+        if total_e < 1e-10:
+            return 0.0
+        return float(np.sum(spec[voice_idx] ** 2) / total_e)
+
+    def update(self, chunk):
+        """
+        Returns: 'START', 'ACTIVE', 'END', or 'SILENT'
+        """
+        energy = float(np.sqrt(np.mean(chunk ** 2)))
+        zcr    = self._zcr(chunk)
+
+        # Update noise floor only in quiet moments
+        if energy < self.noise_floor * 1.5:
+            self.noise_floor = (self.NOISE_ALPHA * self.noise_floor +
+                                (1.0 - self.NOISE_ALPHA) * energy)
+
+        energy_ok    = energy > (self.noise_floor * self.ENERGY_MULTIPLIER)
+        zcr_ok       = self.ZCR_MIN < zcr < self.ZCR_MAX
+        band_ratio   = self._band_ratio(chunk) if energy_ok else 0.0
+        band_ok      = band_ratio > self.BAND_RATIO_MIN
+
+        is_voice = energy_ok and zcr_ok and band_ok
+
+        if is_voice:
+            self.consecutive_voice   += 1
+            self.consecutive_silence  = 0
+        else:
+            self.consecutive_silence += 1
+            self.consecutive_voice    = 0
+
+        if not self.in_speech:
+            if self.consecutive_voice >= self.CONFIRM_CHUNKS:
+                self.in_speech = True
+                return 'START'
+        else:
+            if self.consecutive_silence >= self.SILENCE_CHUNKS:
+                self.in_speech = False
+                return 'END'
+            return 'ACTIVE'
+
+        return 'SILENT'
+
+    def reset(self):
+        self.consecutive_voice   = 0
+        self.consecutive_silence = 0
+        self.in_speech           = False
+
+# ==========================================
+# BEAT TRACKER
 # ==========================================
 class BeatTracker:
-    """Advanced beat detection and synchronization"""
     def __init__(self):
-        self.bpm_history = collections.deque(maxlen=20)  # Last 20 beats
-        self.beat_timestamps = collections.deque(maxlen=10)  # Last 10 beat times
-        self.smoothed_bpm = 0.0
+        self.bpm_history     = collections.deque(maxlen=20)
+        self.beat_timestamps = collections.deque(maxlen=10)
+        self.smoothed_bpm    = 0.0
         self.beat_confidence = 0.0
-        self.last_beat_time = 0.0
-        self.beat_phase = 0.0
-        self.beat_interval = 0.5  # seconds between beats
-        
-    def add_beat(self, bpm, current_time):
-        """Add a detected beat with confidence calculation"""
-        if len(self.beat_timestamps) > 0:
-            time_since_last = current_time - self.last_beat_time
-            expected_interval = 60.0 / bpm if bpm > 0 else 0.5
-            
-            # Confidence based on beat regularity
-            if expected_interval > 0.1:
-                interval_error = abs(time_since_last - expected_interval) / expected_interval
-                confidence = max(0.0, 1.0 - interval_error)
-            else:
-                confidence = 0.5
+        self.last_beat_time  = 0.0
+        self.beat_interval   = 0.5
+
+    def add_beat(self, bpm, t):
+        if self.beat_timestamps:
+            dt = t - self.last_beat_time
+            ei = 60.0 / bpm if bpm > 0 else 0.5
+            self.beat_confidence = max(0.0, 1.0 - abs(dt - ei) / ei) if ei > 0.1 else 0.5
         else:
-            confidence = 0.8
-        
+            self.beat_confidence = 0.8
+
         self.bpm_history.append(bpm)
-        self.beat_timestamps.append(current_time)
-        self.last_beat_time = current_time
-        self.beat_confidence = confidence
-        
-        # Exponential moving average for smooth BPM
-        if len(self.bpm_history) > 0:
-            alpha = 0.3  # Smoothing factor
-            self.smoothed_bpm = alpha * bpm + (1.0 - alpha) * self.smoothed_bpm
-        
-        # Update beat interval
+        self.beat_timestamps.append(t)
+        self.last_beat_time   = t
+        self.smoothed_bpm     = 0.3 * bpm + 0.7 * self.smoothed_bpm
+
         if len(self.beat_timestamps) >= 2:
-            intervals = [self.beat_timestamps[i] - self.beat_timestamps[i-1] 
-                        for i in range(1, len(self.beat_timestamps))]
-            self.beat_interval = np.median(intervals) if intervals else 0.5
-    
-    def get_next_beat_time(self, current_time):
-        """Predict when the next beat will occur"""
-        if self.last_beat_time == 0:
-            return current_time + 0.5
-        time_since_beat = current_time - self.last_beat_time
-        beats_ahead = int(time_since_beat / self.beat_interval) + 1
-        return self.last_beat_time + (beats_ahead * self.beat_interval)
-    
-    def is_beat_aligned(self, current_time, tolerance=0.1):
-        """Check if we're aligned with a beat"""
-        next_beat = self.get_next_beat_time(current_time)
-        return abs(current_time - next_beat) < tolerance
-    
+            intervals          = [self.beat_timestamps[i] - self.beat_timestamps[i-1]
+                                  for i in range(1, len(self.beat_timestamps))]
+            self.beat_interval = float(np.median(intervals))
+
     def get_valid_bpm(self):
-        """Return the most confident BPM estimate"""
-        if len(self.bpm_history) == 0:
-            return 0
-        
-        # Filter outliers (BPM should be reasonable: 60-180)
-        valid_bpms = [b for b in self.bpm_history if 50 < b < 200]
-        
-        if len(valid_bpms) == 0:
-            return self.smoothed_bpm
-        
-        return np.median(valid_bpms)
+        valid = [b for b in self.bpm_history if 50 < b < 200]
+        return float(np.median(valid)) if valid else self.smoothed_bpm
 
-
-class VoiceDetector:
-    """Advanced voice command detection"""
-    def __init__(self):
-        self.syllable_buffer = collections.deque(maxlen=30)
-        self.noise_floor = 0.01
-        self.voice_threshold = 0.05
-        self.last_recognition_time = 0.0
-        self.failed_attempts = 0
-        self.max_retries = 2
-        
-    def update_noise_floor(self, energy):
-        """Adaptive noise floor estimation"""
-        alpha = 0.95
-        self.noise_floor = alpha * self.noise_floor + (1.0 - alpha) * energy
-    
-    def is_voice_active(self, energy):
-        """Detect voice activity with hysteresis"""
-        return energy > (self.noise_floor + self.voice_threshold)
-    
-    def should_trigger_recognition(self):
-        """Decide if we have enough voice evidence"""
-        recent_activity = list(self.syllable_buffer)[-10:] if len(self.syllable_buffer) >= 10 else []
-        if len(recent_activity) < 8:
-            return False
-        
-        # Need at least 8 syllables in recent activity
-        active_count = sum(1 for x in recent_activity if x > 0.5)
-        return active_count >= 8
-
-
+# ==========================================
+# ROBOT STATE
+# ==========================================
 class RobotState:
     def __init__(self):
-        self.bpm = 0.0
-        self.genre = "Listening..."
-        self.beat_hit = False
-        self.music_speed = "IDLE"
-        self.voice_active = False
-        self.command_detected_time = 0.0
-        
-        self.beat_tracker = BeatTracker()
-        self.voice_detector = VoiceDetector()
-        
+        self.bpm                     = 0.0
+        self.genre                   = "Listening..."
+        self.beat_hit                = False
+        self.music_speed             = "IDLE"
+        self.voice_active            = False
+        self.command_detected_time   = 0.0
+        self.beat_tracker            = BeatTracker()
+        self.vad                     = VAD()
         self.last_dance_command_time = time.time()
-        self.voice_override_until = 0.0
-        self.dance_interval = 1.0  # Seconds between dance changes
-        
-        self.lock = threading.Lock()
-
+        self.voice_override_until    = 0.0
+        self.dance_interval          = 1.0
+        self.lock                    = threading.Lock()
 
 state = RobotState()
 
 # ==========================================
-# AI ENGINE
+# TWO-STAGE AUDIO CAPTURE BUFFER
+# ==========================================
+# WHY TWO BUFFERS:
+#
+# pre_buffer — Always rolling. Stores the last PRE_BUFFER_SEC seconds.
+#   When VAD fires START we already missed the first ~160ms of the word
+#   (the confirmation window takes time). The pre_buffer captures that
+#   audio so we can prepend it — Google gets the COMPLETE utterance
+#   including the very first phoneme. Without this, "forward" might
+#   arrive as "orward" and fail to match.
+#
+# capture_buffer — Accumulates audio only while speech is active.
+#   Cleared and sent to Google when VAD fires END.
+#   Maximum 3 seconds to prevent runaway captures.
+
+PRE_BUFFER_SEC  = 0.7
+CAPTURE_MAX_SEC = 3.0
+
+_pre_buf_lock    = threading.Lock()
+_pre_buf         = collections.deque(maxlen=int(RATE * PRE_BUFFER_SEC / CHUNK))
+_capture_buf     = []
+_capturing       = False
+_capture_start   = 0.0
+
+# ==========================================
+# YAMNET AI ENGINE
 # ==========================================
 yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
 
 def get_class_names():
     class_map_path = yamnet_model.class_map_path().numpy().decode('utf-8')
-    class_names = []
-    with tf.io.gfile.GFile(class_map_path) as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            class_names.append(row['display_name'])
-    return class_names
+    names = []
+    with tf.io.gfile.GFile(class_map_path) as f:
+        for row in csv.DictReader(f):
+            names.append(row['display_name'])
+    return names
 
 YAMNET_CLASSES = get_class_names()
+audio_buffer   = np.zeros(RATE * 3, dtype=np.float32)
 
-audio_buffer = np.zeros(RATE * 3, dtype=np.float32)
-voice_byte_buffer = b""
+# ==========================================
+# SPEECH RECOGNIZER + CALIBRATION
+# ==========================================
 recognizer = sr.Recognizer()
+recognizer.dynamic_energy_threshold = False  # Prevents mid-session recalibration
+                                             # (music volume changes would
+                                             #  confuse the adaptive threshold)
 
-def say_phrase_offline(text_to_say):
-    def speak_worker():
+def calibrate_recognizer():
+    """
+    Records 2 seconds of ambient audio at startup and sets the energy
+    threshold from the actual noise floor of your microphone and room.
+    This is far better than a hardcoded value because:
+    - Different mics have different sensitivities
+    - Different rooms have different ambient noise
+    - Music playing in the background shifts the baseline
+    Called once before threads start — does NOT run in background.
+    """
+    print("Calibrating microphone (2 seconds of silence please)...")
+    mic = sc.default_microphone()
+    samples = []
+    with mic.recorder(samplerate=RATE, channels=1) as rec:
+        for _ in range(int(RATE * 2 / CHUNK)):
+            chunk   = rec.record(numframes=CHUNK).flatten().astype(np.float32)
+            samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
+    noise = float(np.percentile(samples, 75))
+    recognizer.energy_threshold = max(300, noise * 8 * 32767)
+    print(f"Calibrated. Noise floor: {noise:.4f} | SR threshold: {recognizer.energy_threshold:.0f}")
+
+def say_phrase_offline(text):
+    def _speak():
         try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 145)
-            engine.setProperty('volume', 1.0)
-            engine.say(text_to_say)
-            engine.runAndWait()
+            e = pyttsx3.init()
+            e.setProperty('rate', 145)
+            e.setProperty('volume', 1.0)
+            e.say(text)
+            e.runAndWait()
         except:
             pass
-    t = threading.Thread(target=speak_worker, daemon=True)
-    t.start()
+    threading.Thread(target=_speak, daemon=True).start()
 
+# ==========================================
+# YAMNET THREAD
+# ==========================================
 def run_yamnet_periodically():
-    """Genre detection thread"""
     while True:
         time.sleep(4)
-        snapshot = np.copy(audio_buffer)
-        scores, embeddings, spectrogram = yamnet_model(snapshot)
-        mean_scores = np.mean(scores, axis=0)
-        top_class_index = np.argmax(mean_scores)
+        snap   = np.copy(audio_buffer)
+        scores, _, _ = yamnet_model(snap)
+        top    = int(np.argmax(np.mean(scores, axis=0)))
         with state.lock:
             if "CMD" not in state.genre:
-                state.genre = YAMNET_CLASSES[top_class_index]
+                state.genre = YAMNET_CLASSES[top]
 
 # ==========================================
-# ADVANCED VOICE PROCESSING
+# COMMAND MATCHING + GOOGLE SPEECH
 # ==========================================
+# AUDIO NORMALIZATION: before sending to Google we normalize the amplitude.
+# If you speak quietly (or are far from the mic) the raw audio is low-amplitude.
+# Google's acoustic model performs better on normalized audio because
+# it was trained on consistently-leveled samples.
+# Peak normalization to 90% of full scale — loud but not clipping.
+
+def _normalize(audio_float32):
+    peak = np.max(np.abs(audio_float32))
+    if peak > 0.01:
+        return audio_float32 / peak * 0.9
+    return audio_float32
+
+# Command table: keyword → (esp32_command, tts_phrase)
+# Written as a list so multi-keyword entries can share a single action.
+# Order matters — checked top to bottom, first match wins.
+COMMANDS = [
+    (["forward",  "advance"],                   "WALK_FORWARD",   "walking forward"),
+    (["backward", "back",   "reverse"],         "WALK_BACKWARD",  "walking backward"),
+    (["left"],                                  "TURN_LEFT",      "turning left"),
+    (["right"],                                 "TURN_RIGHT",     "turning right"),
+    (["stop",     "stand",  "halt"],            "STAND",          "stopping"),
+    (["dance",    "party",  "groove"],          "DANCE_CIRCLE",   "lets party"),
+    (["slow",     "acoustic","ballad"],         "DANCE_ROLL_SLOW","slow mode"),
+    (["fast",     "speed",  "rapid", "quick"],  "DANCE_ROLL_FAST","high speed"),
+    (["twist"],                                 "DANCE_TWIST",    "doing the twist"),
+    (["wave",     "hello"],                     "DANCE_WAVE",     "waving hello"),
+    (["circle",   "spin"],                      "DANCE_CIRCLE_2", "spinning around"),
+]
+
 def process_voice_command(audio_bytes):
-    print("\n🎤 [VOICE] Speech detected! Processing...")
-    retry_count = 0
-    
-    while retry_count <= state.voice_detector.max_retries:
+    print("Processing command...")
+
+    for attempt in range(3):
         try:
             audio_data = sr.AudioData(audio_bytes, RATE, 2)
             text = recognizer.recognize_google(audio_data, language='en-US').lower()
-            print(f"🎤 [VOICE] Recognized: '{text}'")
-            
+            print(f"Heard: '{text}'")
+
             matched = False
-            
-            # Priority 1: Movement Commands
-            if "forward" in text or "advance" in text:
-                send_to_esp32("WALK_FORWARD")
-                say_phrase_offline("walking forward")
-                matched = True
-            elif "back" in text or "backward" in text or "reverse" in text:
-                send_to_esp32("WALK_BACKWARD")
-                say_phrase_offline("walking backward")
-                matched = True
-            elif "left" in text:
-                send_to_esp32("TURN_LEFT")
-                say_phrase_offline("turning left")
-                matched = True
-            elif "right" in text:
-                send_to_esp32("TURN_RIGHT")
-                say_phrase_offline("turning right")
-                matched = True
-            elif "stop" in text or "stand" in text or "halt" in text:
-                send_to_esp32("STAND")
-                say_phrase_offline("stopping now")
-                matched = True
-            
-            # Priority 2: Dance Commands
-            elif "dance" in text or "party" in text or "groove" in text:
-                send_to_esp32("DANCE_CIRCLE")
-                say_phrase_offline("lets party")
-                matched = True
-            elif "slow" in text or "acoustic" in text or "ballad" in text:
-                send_to_esp32("DANCE_ROLL_SLOW")
-                say_phrase_offline("entering slow mode")
-                matched = True
-            elif "fast" in text or "speed" in text or "rapid" in text or "quick" in text:
-                send_to_esp32("DANCE_ROLL_FAST")
-                say_phrase_offline("initiating high speed")
-                matched = True
-            elif "twist" in text:
-                send_to_esp32("DANCE_TWIST")
-                say_phrase_offline("doing the twist")
-                matched = True
-            elif "wave" in text or "hello" in text:
-                send_to_esp32("DANCE_WAVE")
-                say_phrase_offline("waving hello")
-                matched = True
-            elif "circle" in text or "spin" in text:
-                send_to_esp32("DANCE_CIRCLE_2")
-                say_phrase_offline("spinning around")
-                matched = True
-            
-            if matched:
-                with state.lock:
-                    state.command_detected_time = time.time()
-                    state.voice_override_until = time.time() + 12.0
-                    state.beat_tracker.bpm_history.clear()
-                break  # Success! Exit retry loop
-            else:
-                # Command not recognized
-                if retry_count < state.voice_detector.max_retries:
-                    print(f"🎤 [VOICE] Command not recognized. Retrying... ({retry_count + 1}/{state.voice_detector.max_retries})")
-                    retry_count += 1
-                else:
-                    print("🎤 [VOICE] Command not understood")
+            for keywords, cmd, phrase in COMMANDS:
+                if any(kw in text for kw in keywords):
+                    send_to_esp32(cmd)
+                    say_phrase_offline(phrase)
+                    with state.lock:
+                        state.command_detected_time = time.time()
+                        state.voice_override_until  = time.time() + 12.0
+                        state.beat_tracker.bpm_history.clear()
+                    print(f"Executed: {cmd}")
+                    matched = True
                     break
-        
+
+            if not matched:
+                print(f"No command matched: '{text}'")
+            break   # Don't retry on successful transcription, even if unmatched
+
         except sr.UnknownValueError:
-            print(f"🎤 [VOICE] Could not understand audio. Retrying... ({retry_count + 1}/{state.voice_detector.max_retries})")
-            retry_count += 1
+            print(f"Could not understand (attempt {attempt+1}/3)")
+            if attempt < 2:
+                time.sleep(0.08)
         except sr.RequestError as e:
-            print(f"🎤 [VOICE] API error: {e}")
+            print(f"Google API error: {e}")
             break
         except Exception as e:
-            print(f"🎤 [VOICE] Error: {e}")
+            print(f"Error: {e}")
             break
-    
-    time.sleep(1.5)
+
     with state.lock:
         state.voice_active = False
+    state.vad.reset()
 
 # ==========================================
-# PROFESSIONAL AUDIO LISTENER WITH BEAT SYNC
+# TRIGGER HELPER
+# ==========================================
+def _trigger_recognition():
+    global _capturing, _capture_buf
+    if not _capture_buf:
+        _capturing = False
+        return
+
+    audio = np.concatenate(_capture_buf).astype(np.float32)
+    audio = _normalize(audio)
+    audio_bytes = (audio * 32767).astype(np.int16).tobytes()
+
+    with state.lock:
+        state.voice_active = True
+
+    _capturing   = False
+    _capture_buf = []
+
+    threading.Thread(
+        target=process_voice_command,
+        args=(audio_bytes,),
+        daemon=True
+    ).start()
+
+# ==========================================
+# MAIN AUDIO LISTENER
 # ==========================================
 def audio_listener():
-    global audio_buffer, voice_byte_buffer
-    
+    global audio_buffer, _capture_buf, _capturing, _capture_start
+
     aubio_tempo = aubio.tempo("specflux", 1024, CHUNK, RATE)
-    aubio_tempo.set_threshold(0.5)  # Slightly lower threshold
-    aubio_syllable = aubio.onset("mkl", 1024, CHUNK, RATE)
-    aubio_syllable.set_threshold(0.25)  # More sensitive
-    
-    default_mic = sc.default_microphone()
-    
-    print(f"\n=== AI DANCER PROFESSIONAL MODE ===")
-    print("Ready for voice commands and music!\n")
-    
+    aubio_tempo.set_threshold(0.5)
+
+    mic           = sc.default_microphone()
     beat_debounce = time.time()
-    voice_debounce = time.time()
-    
-    with default_mic.recorder(samplerate=RATE, channels=1) as recorder:
+
+    print("\n=== AI DANCER — HIGH ACCURACY VAD ===\n")
+
+    with mic.recorder(samplerate=RATE, channels=1) as recorder:
         while True:
-            raw_data = recorder.record(numframes=CHUNK)
-            audio_chunk = raw_data.flatten().astype(np.float32)
-            current_time = time.time()
-            
-            # Update buffers
+            raw          = recorder.record(numframes=CHUNK)
+            chunk        = raw.flatten().astype(np.float32)
+            now          = time.time()
+
+            # Rolling buffer for YAMNet
             audio_buffer = np.roll(audio_buffer, -CHUNK)
-            audio_buffer[-CHUNK:] = audio_chunk
-            
-            int16_chunk = (audio_chunk * 32767).astype(np.int16).tobytes()
-            voice_byte_buffer += int16_chunk
-            if len(voice_byte_buffer) > RATE * 4 * 2:
-                voice_byte_buffer = voice_byte_buffer[-(RATE * 4 * 2):]
-            
-            # Process voice (with better energy detection)
-            vocal_audio = butter_bandpass_filter(audio_chunk)
-            energy = np.sqrt(np.mean(vocal_audio ** 2))
-            
+            audio_buffer[-CHUNK:] = chunk
+
+            # Always update pre-buffer
+            with _pre_buf_lock:
+                _pre_buf.append(chunk.copy())
+
+            # VAD on bandpass-filtered chunk
+            vocal = bandpass(chunk)
+
             with state.lock:
-                state.voice_detector.update_noise_floor(energy)
-                is_voice_active = state.voice_detector.is_voice_active(energy)
-            
-            if is_voice_active:
-                state.voice_detector.syllable_buffer.append(1.0)
-            else:
-                state.voice_detector.syllable_buffer.append(0.0)
-            
-            # VOICE TRIGGER with debounce
-            if (current_time - voice_debounce > 0.5 and 
-                state.voice_detector.should_trigger_recognition() and 
-                not state.voice_active):
-                
-                with state.lock:
-                    state.voice_active = True
-                voice_snapshot = bytes(voice_byte_buffer)
-                threading.Thread(target=process_voice_command, args=(voice_snapshot,), daemon=True).start()
-                voice_debounce = current_time
-            
-            # BEAT DETECTION with debounce
-            if aubio_tempo(audio_chunk)[0]:
-                if current_time - beat_debounce > 0.2:  # 200ms debounce
+                skip_vad = state.voice_active or (now < state.voice_override_until)
+
+            if not skip_vad:
+                vad_result = state.vad.update(vocal)
+
+                if vad_result == 'START' and not _capturing:
+                    _capturing     = True
+                    _capture_start = now
+                    # Prepend pre-buffer: captures audio before trigger fired
+                    with _pre_buf_lock:
+                        _capture_buf = [c.copy() for c in _pre_buf]
+                    _capture_buf.append(chunk.copy())
+                    print("Voice start")
+
+                elif vad_result in ('ACTIVE', 'START') and _capturing:
+                    _capture_buf.append(chunk.copy())
+                    if now - _capture_start > CAPTURE_MAX_SEC:
+                        print("Max length reached, sending...")
+                        _trigger_recognition()
+
+                elif vad_result == 'END' and _capturing:
+                    print("Voice end")
+                    _trigger_recognition()
+
+            elif _capturing:
+                # Voice override activated mid-capture — discard
+                _capturing   = False
+                _capture_buf = []
+                state.vad.reset()
+
+            # Beat detection
+            if aubio_tempo(chunk)[0]:
+                if now - beat_debounce > 0.2:
                     bpm = aubio_tempo.get_bpm()
-                    
-                    # Smart BPM adjustment
                     with state.lock:
-                        genre = state.genre
-                        
-                        # Reject unrealistic BPMs
-                        if bpm < 30:
+                        g = state.genre
+                        if bpm < 30:    bpm *= 2
+                        elif bpm > 200: bpm /= 2
+                        if 40 < bpm < 90 and any(x in g for x in ["Electronic","Dance","Rock","Pop"]):
                             bpm *= 2
-                        elif bpm > 200:
-                            bpm /= 2
-                        
-                        # Double BPM for slow genres if it's in the lower range
-                        if 40 < bpm < 90 and any(g in genre for g in ["Electronic", "Dance", "Rock", "Pop"]):
-                            bpm *= 2
-                        
-                        # Add to beat tracker
-                        state.beat_tracker.add_beat(bpm, current_time)
-                        state.bpm = state.beat_tracker.smoothed_bpm
+                        state.beat_tracker.add_beat(bpm, now)
+                        state.bpm      = state.beat_tracker.smoothed_bpm
                         state.beat_hit = True
-                    
-                    beat_debounce = current_time
-            
-            # BEAT-SYNCED CHOREOGRAPHY
+                    beat_debounce = now
+
+            # Beat-synced choreography
             with state.lock:
-                current_time_check = time.time()
-                
-                # Check if enough time has passed since last dance command
-                time_since_dance = current_time_check - state.last_dance_command_time
-                is_overdue = time_since_dance >= state.dance_interval
-                
-                # Check voice override
-                not_in_voice_mode = current_time_check > state.voice_override_until and not state.voice_active
-                
-                # Check if we have reliable beat data
-                has_beats = len(state.beat_tracker.bpm_history) >= 3
-                beat_confident = state.beat_tracker.beat_confidence > 0.4
-                
-                if is_overdue and not_in_voice_mode and has_beats and beat_confident:
-                    avg_bpm = state.beat_tracker.get_valid_bpm()
-                    current_genre = state.genre
-                    
-                    # Smart choreography selection
-                    slow_genres = ["Acoustic", "Vocal", "Speech", "Choir", "Folk", "Singer", "Ballad", "Blues"]
-                    
-                    if any(g in current_genre for g in slow_genres) or avg_bpm < 100:
+                t             = time.time()
+                overdue       = (t - state.last_dance_command_time) >= state.dance_interval
+                free          = t > state.voice_override_until and not state.voice_active
+                has_beats     = len(state.beat_tracker.bpm_history) >= 3
+                confident     = state.beat_tracker.beat_confidence > 0.4
+
+                if overdue and free and has_beats and confident:
+                    bpm_val = state.beat_tracker.get_valid_bpm()
+                    genre   = state.genre
+                    slow    = ["Acoustic","Vocal","Speech","Choir","Folk","Singer","Ballad","Blues"]
+
+                    if any(s in genre for s in slow) or bpm_val < 100:
                         state.music_speed = "SLOW"
-                        next_move = random.choice([
-                            "DANCE_ROLL_SLOW", "DANCE_PEACOCK", 
-                            "DANCE_WAVE", "DANCE_RIPPLE"
-                        ])
-                        print(f"🎼 SLOW ({avg_bpm:.0f} BPM) → {next_move}")
-                    
-                    elif avg_bpm < 130:
+                        move = random.choice(["DANCE_ROLL_SLOW","DANCE_PEACOCK","DANCE_WAVE","DANCE_RIPPLE"])
+                        print(f"SLOW {bpm_val:.0f} BPM -> {move}")
+                    elif bpm_val < 130:
                         state.music_speed = "MEDIUM"
-                        next_move = random.choice([
-                            "DANCE_TWIST", "DANCE_RIPPLE_2",
-                            "DANCE_CIRCLE", "DANCE_SALSA"
-                        ])
-                        print(f"🎵 MEDIUM ({avg_bpm:.0f} BPM) → {next_move}")
-                    
+                        move = random.choice(["DANCE_TWIST","DANCE_RIPPLE_2","DANCE_CIRCLE","DANCE_SALSA"])
+                        print(f"MEDIUM {bpm_val:.0f} BPM -> {move}")
                     else:
                         state.music_speed = "FAST"
-                        next_move = random.choice([
-                            "DANCE_ROLL_FAST", "DANCE_TWIST_2",
-                            "DANCE_CIRCLE_2"
-                        ])
-                        print(f"🔥 FAST ({avg_bpm:.0f} BPM) → {next_move}")
-                    
-                    send_to_esp32(next_move)
-                    state.last_dance_command_time = current_time_check
+                        move = random.choice(["DANCE_ROLL_FAST","DANCE_TWIST_2","DANCE_CIRCLE_2"])
+                        print(f"FAST {bpm_val:.0f} BPM -> {move}")
+
+                    send_to_esp32(move)
+                    state.last_dance_command_time = t
                     state.beat_tracker.bpm_history.clear()
 
-ai_thread = threading.Thread(target=run_yamnet_periodically, daemon=True)
-ai_thread.start()
-
-audio_thread = threading.Thread(target=audio_listener, daemon=True)
-audio_thread.start()
-
 # ==========================================
-# DISPLAY ENGINE
+# DISPLAY
 # ==========================================
 def init_display():
-    spi = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
+    spi  = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
     disp = ili9341.ILI9341(
-        spi, cs=digitalio.DigitalInOut(DISPLAY_CS_PIN),
+        spi,
+        cs=digitalio.DigitalInOut(DISPLAY_CS_PIN),
         dc=digitalio.DigitalInOut(DISPLAY_DC_PIN),
         rst=digitalio.DigitalInOut(DISPLAY_RST_PIN),
         rotation=90, baudrate=24000000
@@ -489,95 +542,77 @@ def init_display():
 
 def draw_rounded_rect(draw, xy, corner_radius, fill):
     x0, y0, x1, y1 = xy
-    w, h = x1 - x0, y1 - y0
-    r = min(corner_radius, w // 2, h // 2)
+    r = min(corner_radius, (x1-x0)//2, (y1-y0)//2)
     if r <= 0:
-        draw.rectangle([x0, y0, x1, y1], fill=fill)
+        draw.rectangle([x0,y0,x1,y1], fill=fill)
         return
-    draw.rectangle([x0, y0 + r, x1, y1 - r], fill=fill)
-    draw.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
-    draw.pieslice([x0, y0, x0 + r * 2, y0 + r * 2], 180, 270, fill=fill)
-    draw.pieslice([x1 - r * 2, y1 - r * 2, x1, y1], 0, 90, fill=fill)
-    draw.pieslice([x0, y1 - r * 2, x0 + r * 2, y1], 90, 180, fill=fill)
-    draw.pieslice([x1 - r * 2, y0, x1, y0 + r * 2], 270, 360, fill=fill)
+    draw.rectangle([x0, y0+r, x1, y1-r], fill=fill)
+    draw.rectangle([x0+r, y0, x1-r, y1], fill=fill)
+    draw.pieslice([x0,        y0,        x0+r*2, y0+r*2], 180, 270, fill=fill)
+    draw.pieslice([x1-r*2,    y1-r*2,    x1,     y1    ],   0,  90, fill=fill)
+    draw.pieslice([x0,        y1-r*2,    x0+r*2, y1    ],  90, 180, fill=fill)
+    draw.pieslice([x1-r*2,    y0,        x1,     y0+r*2], 270, 360, fill=fill)
 
 def display_loop():
     os.system("amixer set Master 100% > /dev/null 2>&1")
-    disp = init_display()
-    width, height = 320, 240
-    
-    eye_width, eye_height = 70, 120
-    left_x, right_x = 90, 230
-    center_y = 120
-    blink_timer = time.time()
-    is_blinking = False
-    
+    disp              = init_display()
+    eye_w, eye_h      = 70, 120
+    lx, rx            = 90, 230
+    cy                = 120
+    blink_timer       = time.time()
+    is_blinking       = False
+
     while True:
         with state.lock:
-            speed = state.music_speed
-            beat_active = state.beat_hit
-            voice_active = state.voice_active
-            cmd_time = state.command_detected_time
-            bpm = state.bpm
+            speed        = state.music_speed
+            beat_active  = state.beat_hit
+            va           = state.voice_active
+            cmd_t        = state.command_detected_time
+            bpm          = state.bpm
             state.beat_hit = False
-        
-        time_since_cmd = time.time() - cmd_time
-        
-        # Dynamic background
-        if time_since_cmd < 0.25:
-            bg_color = (255, 255, 255)
-        elif time_since_cmd < 1.0:
-            bg_color = (30, 30, 80)
-        elif voice_active:
-            bg_color = (10, 35, 15)
-        else:
-            bg_color = (0, 0, 0)
-        
-        img = Image.new("RGB", (width, height), color=bg_color)
+
+        dt = time.time() - cmd_t
+
+        bg = (255,255,255) if dt<0.25 else (30,30,80) if dt<1.0 else (10,35,15) if va else (0,0,0)
+        img  = Image.new("RGB", (320,240), color=bg)
         draw = ImageDraw.Draw(img)
-        
-        # BPM Display
+
         if bpm > 0:
-            bpm_text = f"{bpm:.0f}"
-            draw.text((10, 10), bpm_text, fill=(100, 100, 100), font=None)
-        
-        # Eyes with mood
-        current_h = eye_height
-        color = (0, 255, 255)
-        center_y_render = center_y
-        
-        if time_since_cmd < 0.25:
-            color, current_h, center_y_render = (0, 0, 0), int(eye_height * 0.4), center_y - 10
-        elif time_since_cmd < 1.0:
-            color, current_h, center_y_render = (0, 191, 255), int(eye_height * 0.4), center_y - 10
-        elif voice_active:
-            color, current_h = (0, 255, 100), int(eye_height * 0.75)
-        elif speed == "FAST":
-            color, current_h = (255, 50, 50), eye_height + 20
-        elif speed == "MEDIUM":
-            color, current_h = (255, 150, 50), eye_height + 10
-        elif speed == "SLOW":
-            color, current_h = (150, 50, 255), int(eye_height * 0.6)
-        
-        eye_width_render = eye_width + 10 if (beat_active and not voice_active and time_since_cmd > 1.0) else eye_width
-        
-        # Blinking
-        if time.time() - blink_timer > np.random.uniform(2.0, 5.0):
+            draw.text((10,10), f"{bpm:.0f}", fill=(100,100,100))
+
+        h  = eye_h
+        col = (0,255,255)
+        cy_r = cy
+
+        if   dt < 0.25: col,h,cy_r = (0,0,0),        int(eye_h*0.4), cy-10
+        elif dt < 1.0:  col,h,cy_r = (0,191,255),     int(eye_h*0.4), cy-10
+        elif va:        col,h      = (0,255,100),      int(eye_h*0.75)
+        elif speed=="FAST":   col,h = (255,50,50),     eye_h+20
+        elif speed=="MEDIUM": col,h = (255,150,50),    eye_h+10
+        elif speed=="SLOW":   col,h = (150,50,255),    int(eye_h*0.6)
+
+        ew = eye_w+10 if (beat_active and not va and dt>1.0) else eye_w
+
+        if time.time()-blink_timer > np.random.uniform(2.0,5.0):
             is_blinking = True
             blink_timer = time.time()
-        if is_blinking and not voice_active and time_since_cmd > 1.0:
-            current_h = 10
-            if time.time() - blink_timer > 0.15:
+        if is_blinking and not va and dt>1.0:
+            h = 10
+            if time.time()-blink_timer > 0.15:
                 is_blinking = False
-        
-        draw_rounded_rect(draw, [left_x - eye_width_render // 2, center_y_render - current_h // 2,
-                                 left_x + eye_width_render // 2, center_y_render + current_h // 2], 
-                         corner_radius=20, fill=color)
-        draw_rounded_rect(draw, [right_x - eye_width_render // 2, center_y_render - current_h // 2,
-                                 right_x + eye_width_render // 2, center_y_render + current_h // 2], 
-                         corner_radius=20, fill=color)
-        
+
+        for cx in [lx, rx]:
+            draw_rounded_rect(draw,
+                [cx-ew//2, cy_r-h//2, cx+ew//2, cy_r+h//2],
+                corner_radius=20, fill=col)
+
         disp.image(img)
         time.sleep(0.03)
 
+# ==========================================
+# STARTUP
+# ==========================================
+calibrate_recognizer()
+threading.Thread(target=run_yamnet_periodically, daemon=True).start()
+threading.Thread(target=audio_listener,          daemon=True).start()
 display_loop()
