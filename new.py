@@ -101,19 +101,27 @@ def _ack_listener():
 threading.Thread(target=_ack_listener, daemon=True).start()
 
 def send_to_esp32(command, priority=1):
-    """Queue a command. Voice commands use priority=0 (sent first)."""
+    """Queue a command. Voice = priority 0 (highest). Beat-sync = priority 1.
+    Beat-sync commands are silently skipped when ESP32 is mid-motion —
+    a stale beat-sync would fire off-beat anyway. Voice always queues.
+    """
+    if priority > 0 and not _esp32_ready.is_set():
+        print(f"ESP32 busy, skipping beat-sync: {command}")
+        return
     _cmd_queue.put((priority, command))
 
 def _cmd_sender():
     """Dequeues commands and sends only when ESP32 signals READY."""
     while True:
         try:
-            _, cmd = _cmd_queue.get(timeout=0.5)
+            pri, cmd = _cmd_queue.get(timeout=0.5)
         except queue.Empty:
             continue
-        # Wait for READY (max 3 s; skip stale commands on timeout)
-        if not _esp32_ready.wait(timeout=3.0):
-            print(f"ESP32 not ready, dropping: {cmd}")
+        # Voice (pri=0): wait up to 15 s — ESP32 may be finishing a long dance.
+        # Beat-sync (pri=1): filtered before queuing if busy, so 5 s is plenty.
+        timeout = 15.0 if pri == 0 else 5.0
+        if not _esp32_ready.wait(timeout=timeout):
+            print(f"ESP32 not ready after {timeout:.0f}s, dropping: {cmd}")
             continue
         _esp32_ready.clear()
         if esp32_serial and esp32_serial.is_open:
@@ -427,14 +435,18 @@ threading.Thread(target=_recalibrate_loop, daemon=True).start()
 
 def say_phrase_offline(text):
     def _speak():
+        engine = None
         try:
-            e = pyttsx3.init()
-            e.setProperty('rate', 145)
-            e.setProperty('volume', 1.0)
-            e.say(text)
-            e.runAndWait()
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 145)
+            engine.setProperty('volume', 1.0)
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()   # explicit stop before engine goes out of scope
         except Exception:
             pass
+        finally:
+            engine = None   # explicit release after callback chain is done
     threading.Thread(target=_speak, daemon=True).start()
 
 # ── Fuzzy keyword matching ────────────────────────────────────────────────────
@@ -695,7 +707,8 @@ def audio_listener():
                 state.beat_tracker.predict_next_beat()   # advance stale prediction
 
                 on_beat   = state.beat_tracker.is_on_beat(window=0.06)
-                free      = now > state.voice_override_until and not state.voice_active
+                esp32_free = _esp32_ready.is_set()   # don't queue if ESP32 is mid-motion
+                free      = now > state.voice_override_until and not state.voice_active and esp32_free
                 has_beats = len(state.beat_tracker.bpm_history) >= 3
                 confident = state.beat_tracker.beat_confidence > 0.4
 
