@@ -197,6 +197,7 @@ class VAD:
     BAND_RATIO_MIN    = 0.55
     CONFIRM_CHUNKS    = 5
     SILENCE_CHUNKS    = 18
+    MIN_NOISE_FLOOR   = 0.001   # FIX: prevents noise_floor decaying to zero in silence
 
     # Pre-compute FFT frequency bins once
     _freqs     = np.fft.rfftfreq(CHUNK, 1.0 / RATE)
@@ -222,16 +223,21 @@ class VAD:
         energy = float(np.sqrt(np.mean(chunk ** 2)))
         zcr    = self._zcr(chunk)
 
-        if energy < self.noise_floor * 1.5:
-            self.noise_floor = (self.NOISE_ALPHA * self.noise_floor
-                                + (1.0 - self.NOISE_ALPHA) * energy)
-
+        # FIX: update noise floor on any non-voice frame (not gated by energy
+        # threshold), and clamp to MIN_NOISE_FLOOR so it never decays to zero.
         energy_ok = energy > (self.noise_floor * self.ENERGY_MULTIPLIER)
         zcr_ok    = self.ZCR_MIN < zcr < self.ZCR_MAX
         # Gate: only run expensive FFT if both cheaper checks pass
         band_ok   = (self._band_ratio(chunk) > self.BAND_RATIO_MIN
                      if (energy_ok and zcr_ok) else False)
         is_voice  = energy_ok and zcr_ok and band_ok
+
+        if not is_voice:
+            self.noise_floor = max(
+                self.MIN_NOISE_FLOOR,
+                self.NOISE_ALPHA * self.noise_floor
+                + (1.0 - self.NOISE_ALPHA) * energy
+            )
 
         if is_voice:
             self.consecutive_voice   += 1
