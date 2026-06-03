@@ -410,28 +410,44 @@ recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = False
 
 def calibrate_recognizer():
-    """Calibrate noise floor from real microphone audio."""
+    """
+    Set SR energy threshold from a brief mic capture.
+    Only called ONCE at startup, before the audio thread opens the mic.
+    After startup, threshold is updated from the VAD noise floor instead.
+    """
     print("Calibrating mic (2 s quiet)…")
     mic     = sc.default_microphone()
     samples = []
-    with mic.recorder(samplerate=RATE, channels=1) as rec:
-        for _ in range(int(RATE * 2 / CHUNK)):
-            chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
-            samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
-    noise = float(np.percentile(samples, 75))
+    try:
+        with mic.recorder(samplerate=RATE, channels=1) as rec:
+            for _ in range(int(RATE * 2 / CHUNK)):
+                chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
+                samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
+        noise = float(np.percentile(samples, 75))
+    except Exception as e:
+        print(f"Mic calibration failed ({e}), using default threshold")
+        noise = 0.01
     recognizer.energy_threshold = max(300, noise * 8 * 32767)
     print(f"Calibrated. Noise={noise:.4f}  SR threshold={recognizer.energy_threshold:.0f}")
 
-def _recalibrate_loop():
-    """Recalibrate every 60 s in background so music volume shifts don't drift threshold."""
+def _update_sr_threshold_from_vad():
+    """
+    Periodically sync the SR energy threshold from the VAD's live noise floor.
+    The VAD updates its noise_floor every chunk from the already-open mic stream,
+    so we never need to re-open the mic here.
+    Runs every 30 s; skips while voice is active.
+    """
     while True:
-        time.sleep(60)
+        time.sleep(30)
         with state.lock:
             if state.voice_active:
                 continue
-        calibrate_recognizer()
+            noise = state.vad.noise_floor
+        new_threshold = max(300, noise * 8 * 32767)
+        recognizer.energy_threshold = new_threshold
+        print(f"SR threshold updated from VAD: noise={noise:.4f}  threshold={new_threshold:.0f}")
 
-threading.Thread(target=_recalibrate_loop, daemon=True).start()
+threading.Thread(target=_update_sr_threshold_from_vad, daemon=True).start()
 
 def say_phrase_offline(text):
     def _speak():
