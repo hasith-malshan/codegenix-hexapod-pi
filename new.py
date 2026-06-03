@@ -101,27 +101,19 @@ def _ack_listener():
 threading.Thread(target=_ack_listener, daemon=True).start()
 
 def send_to_esp32(command, priority=1):
-    """Queue a command. Voice = priority 0 (highest). Beat-sync = priority 1.
-    Beat-sync commands are silently skipped when ESP32 is mid-motion —
-    a stale beat-sync would fire off-beat anyway. Voice always queues.
-    """
-    if priority > 0 and not _esp32_ready.is_set():
-        print(f"ESP32 busy, skipping beat-sync: {command}")
-        return
+    """Queue a command. Voice commands use priority=0 (sent first)."""
     _cmd_queue.put((priority, command))
 
 def _cmd_sender():
     """Dequeues commands and sends only when ESP32 signals READY."""
     while True:
         try:
-            pri, cmd = _cmd_queue.get(timeout=0.5)
+            _, cmd = _cmd_queue.get(timeout=0.5)
         except queue.Empty:
             continue
-        # Voice (pri=0): wait up to 15 s — ESP32 may be finishing a long dance.
-        # Beat-sync (pri=1): filtered before queuing if busy, so 5 s is plenty.
-        timeout = 15.0 if pri == 0 else 5.0
-        if not _esp32_ready.wait(timeout=timeout):
-            print(f"ESP32 not ready after {timeout:.0f}s, dropping: {cmd}")
+        # Wait for READY (max 3 s; skip stale commands on timeout)
+        if not _esp32_ready.wait(timeout=3.0):
+            print(f"ESP32 not ready, dropping: {cmd}")
             continue
         _esp32_ready.clear()
         if esp32_serial and esp32_serial.is_open:
@@ -410,59 +402,39 @@ recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = False
 
 def calibrate_recognizer():
-    """
-    Set SR energy threshold from a brief mic capture.
-    Only called ONCE at startup, before the audio thread opens the mic.
-    After startup, threshold is updated from the VAD noise floor instead.
-    """
+    """Calibrate noise floor from real microphone audio."""
     print("Calibrating mic (2 s quiet)…")
     mic     = sc.default_microphone()
     samples = []
-    try:
-        with mic.recorder(samplerate=RATE, channels=1) as rec:
-            for _ in range(int(RATE * 2 / CHUNK)):
-                chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
-                samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
-        noise = float(np.percentile(samples, 75))
-    except Exception as e:
-        print(f"Mic calibration failed ({e}), using default threshold")
-        noise = 0.01
+    with mic.recorder(samplerate=RATE, channels=1) as rec:
+        for _ in range(int(RATE * 2 / CHUNK)):
+            chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
+            samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
+    noise = float(np.percentile(samples, 75))
     recognizer.energy_threshold = max(300, noise * 8 * 32767)
     print(f"Calibrated. Noise={noise:.4f}  SR threshold={recognizer.energy_threshold:.0f}")
 
-def _update_sr_threshold_from_vad():
-    """
-    Periodically sync the SR energy threshold from the VAD's live noise floor.
-    The VAD updates its noise_floor every chunk from the already-open mic stream,
-    so we never need to re-open the mic here.
-    Runs every 30 s; skips while voice is active.
-    """
+def _recalibrate_loop():
+    """Recalibrate every 60 s in background so music volume shifts don't drift threshold."""
     while True:
-        time.sleep(30)
+        time.sleep(60)
         with state.lock:
             if state.voice_active:
                 continue
-            noise = state.vad.noise_floor
-        new_threshold = max(300, noise * 8 * 32767)
-        recognizer.energy_threshold = new_threshold
-        print(f"SR threshold updated from VAD: noise={noise:.4f}  threshold={new_threshold:.0f}")
+        calibrate_recognizer()
 
-threading.Thread(target=_update_sr_threshold_from_vad, daemon=True).start()
+threading.Thread(target=_recalibrate_loop, daemon=True).start()
 
 def say_phrase_offline(text):
     def _speak():
-        engine = None
         try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 145)
-            engine.setProperty('volume', 1.0)
-            engine.say(text)
-            engine.runAndWait()
-            engine.stop()   # explicit stop before engine goes out of scope
+            e = pyttsx3.init()
+            e.setProperty('rate', 145)
+            e.setProperty('volume', 1.0)
+            e.say(text)
+            e.runAndWait()
         except Exception:
             pass
-        finally:
-            engine = None   # explicit release after callback chain is done
     threading.Thread(target=_speak, daemon=True).start()
 
 # ── Fuzzy keyword matching ────────────────────────────────────────────────────
@@ -723,8 +695,7 @@ def audio_listener():
                 state.beat_tracker.predict_next_beat()   # advance stale prediction
 
                 on_beat   = state.beat_tracker.is_on_beat(window=0.06)
-                esp32_free = _esp32_ready.is_set()   # don't queue if ESP32 is mid-motion
-                free      = now > state.voice_override_until and not state.voice_active and esp32_free
+                free      = now > state.voice_override_until and not state.voice_active
                 has_beats = len(state.beat_tracker.bpm_history) >= 3
                 confident = state.beat_tracker.beat_confidence > 0.4
 
