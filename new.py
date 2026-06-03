@@ -197,7 +197,6 @@ class VAD:
     BAND_RATIO_MIN    = 0.55
     CONFIRM_CHUNKS    = 5
     SILENCE_CHUNKS    = 18
-    MIN_NOISE_FLOOR   = 0.001   # FIX: prevents noise_floor decaying to zero in silence
 
     # Pre-compute FFT frequency bins once
     _freqs     = np.fft.rfftfreq(CHUNK, 1.0 / RATE)
@@ -223,22 +222,16 @@ class VAD:
         energy = float(np.sqrt(np.mean(chunk ** 2)))
         zcr    = self._zcr(chunk)
 
+        if energy < self.noise_floor * 1.5:
+            self.noise_floor = (self.NOISE_ALPHA * self.noise_floor
+                                + (1.0 - self.NOISE_ALPHA) * energy)
+
         energy_ok = energy > (self.noise_floor * self.ENERGY_MULTIPLIER)
         zcr_ok    = self.ZCR_MIN < zcr < self.ZCR_MAX
         # Gate: only run expensive FFT if both cheaper checks pass
         band_ok   = (self._band_ratio(chunk) > self.BAND_RATIO_MIN
                      if (energy_ok and zcr_ok) else False)
         is_voice  = energy_ok and zcr_ok and band_ok
-
-        # FIX: update noise floor on every non-voice frame (not gated by the
-        # old energy < noise_floor*1.5 condition that caused decay to zero).
-        # Clamped to MIN_NOISE_FLOOR so it never reaches zero in silence.
-        if not is_voice:
-            self.noise_floor = max(
-                self.MIN_NOISE_FLOOR,
-                self.NOISE_ALPHA * self.noise_floor
-                + (1.0 - self.NOISE_ALPHA) * energy
-            )
 
         if is_voice:
             self.consecutive_voice   += 1
@@ -418,16 +411,24 @@ recognizer.dynamic_energy_threshold = False
 
 def calibrate_recognizer():
     """
-    Skip separate mic capture to avoid double-open conflict with audio_listener.
-    SR threshold starts at 300 and is updated every 30 s from the VAD noise
-    floor once the main audio thread is running.
-    FIX: removed mic.recorder() call here — opening the mic twice (once here,
-    once in audio_listener) caused the second open to return silence on Linux/
-    PulseAudio, breaking both beat detection and VAD.
+    Set SR energy threshold from a brief mic capture.
+    Only called ONCE at startup, before the audio thread opens the mic.
+    After startup, threshold is updated from the VAD noise floor instead.
     """
-    print("Calibrating mic — VAD adaptive threshold active (no separate capture)...")
-    recognizer.energy_threshold = 300
-    print(f"SR threshold=300  (VAD will adapt from live audio every 30 s)")
+    print("Calibrating mic (2 s quiet)…")
+    mic     = sc.default_microphone()
+    samples = []
+    try:
+        with mic.recorder(samplerate=RATE, channels=1) as rec:
+            for _ in range(int(RATE * 2 / CHUNK)):
+                chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
+                samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
+        noise = float(np.percentile(samples, 75))
+    except Exception as e:
+        print(f"Mic calibration failed ({e}), using default threshold")
+        noise = 0.01
+    recognizer.energy_threshold = max(300, noise * 8 * 32767)
+    print(f"Calibrated. Noise={noise:.4f}  SR threshold={recognizer.energy_threshold:.0f}")
 
 def _update_sr_threshold_from_vad():
     """
@@ -534,7 +535,7 @@ def _normalize_chunk_rms(chunk, target_rms=0.05):
     return chunk
 
 def process_voice_command(audio_bytes):
-    print("Processing voice command...")
+    print("Processing voice command…")
     for attempt in range(3):
         try:
             audio_data = sr.AudioData(audio_bytes, RATE, 2)
@@ -688,7 +689,7 @@ def audio_listener():
                     # Normalize each chunk on the way in
                     _capture_buf.append(_normalize_chunk_rms(chunk.copy()))
                     if now - _capture_start > CAPTURE_MAX_SEC:
-                        print("Max capture length, sending...")
+                        print("Max capture length, sending…")
                         _trigger_recognition()
 
                 elif vad_result == 'END' and _capturing:
@@ -721,11 +722,11 @@ def audio_listener():
             with state.lock:
                 state.beat_tracker.predict_next_beat()   # advance stale prediction
 
-                on_beat    = state.beat_tracker.is_on_beat(window=0.06)
-                esp32_free = _esp32_ready.is_set()
-                free       = now > state.voice_override_until and not state.voice_active and esp32_free
-                has_beats  = len(state.beat_tracker.bpm_history) >= 3
-                confident  = state.beat_tracker.beat_confidence > 0.4
+                on_beat   = state.beat_tracker.is_on_beat(window=0.06)
+                esp32_free = _esp32_ready.is_set()   # don't queue if ESP32 is mid-motion
+                free      = now > state.voice_override_until and not state.voice_active and esp32_free
+                has_beats = len(state.beat_tracker.bpm_history) >= 3
+                confident = state.beat_tracker.beat_confidence > 0.4
 
                 # Use beat interval as dance interval (not fixed 1.0 s)
                 beat_iv   = state.beat_tracker.beat_interval
