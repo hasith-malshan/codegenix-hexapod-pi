@@ -43,22 +43,72 @@ except Exception as e:
     print(f"Failed to connect: {e}")
     esp32_serial = None
 
+# ==========================================
+# FIX: ACK-GATED COMMAND SENDER
+#
+# ORIGINAL BUG: send_to_esp32() wrote commands directly with no
+# flow control. If a beat-sync move fired while a previous dance
+# was still running on the ESP32, the ESP32 received two commands
+# in quick succession. It processed the first immediately and the
+# second arrived mid-motion — causing processCommand() to set a
+# new currentState while smoothLegsToTarget() was mid-loop.
+# checkStop() only polled every 3rd step, so the ESP32 sometimes
+# missed the new command entirely and continued with the old move.
+#
+# FIX: After every command we wait for "READY\n" from the ESP32
+# before allowing the next command to be sent. A background thread
+# reads the serial port continuously. send_to_esp32() queues
+# commands and only releases them when the ESP32 is ready.
+# A timeout of 8 seconds prevents a deadlock if READY is lost.
+# ==========================================
+
+_esp32_ready      = threading.Event()
+_esp32_ready.set()   # Initially ready (ESP32 sends READY on boot)
+_send_lock        = threading.Lock()
+READY_TIMEOUT_SEC = 8.0
+
+def esp32_reader_thread():
+    """Background thread: reads all serial output from ESP32.
+    Sets _esp32_ready when 'READY' is received.
+    Prints everything else for debugging.
+    """
+    while True:
+        if esp32_serial and esp32_serial.is_open:
+            try:
+                line = esp32_serial.readline().decode('utf-8', errors='ignore').strip()
+                if line == "READY":
+                    _esp32_ready.set()
+                elif line:
+                    print(f"[ESP32] {line}")
+            except Exception as e:
+                print(f"Serial read error: {e}")
+                time.sleep(0.1)
+        else:
+            time.sleep(0.1)
+
 def send_to_esp32(command):
-    if esp32_serial and esp32_serial.is_open:
+    """Send a command only after the ESP32 signals it is ready.
+    Blocks for up to READY_TIMEOUT_SEC seconds waiting for READY.
+    """
+    if not (esp32_serial and esp32_serial.is_open):
+        return
+    with _send_lock:
+        if not _esp32_ready.wait(timeout=READY_TIMEOUT_SEC):
+            print(f"WARNING: ESP32 READY timeout — sending '{command}' anyway")
+        _esp32_ready.clear()
         try:
             esp32_serial.write((command + "\n").encode('utf-8'))
             print(f"Sent: {command}")
         except Exception as e:
             print(f"Send failed: {e}")
+            _esp32_ready.set()   # Unblock on error
 
 # ==========================================
 # AUDIO CONFIG
 # ==========================================
 RATE  = 16000
-CHUNK = 512   # Increased from 256: reduces CPU overhead per chunk
+CHUNK = 512
 
-# Pre-compute filter coefficients once at startup.
-# Original code recomputed them every single chunk — wasted CPU.
 def _make_bandpass(lowcut, highcut, fs, order=4):
     nyq  = 0.5 * fs
     b, a = butter(order, [lowcut / nyq, highcut / nyq], btype='band')
@@ -69,45 +119,21 @@ _BP_B, _BP_A = _make_bandpass(300, 3400, RATE, order=4)
 def bandpass(data):
     return np.ascontiguousarray(lfilter(_BP_B, _BP_A, data), dtype=np.float32)
 
-DISPLAY_CS_PIN = board.CE0
-DISPLAY_DC_PIN = board.D24
+DISPLAY_CS_PIN  = board.CE0
+DISPLAY_DC_PIN  = board.D24
 DISPLAY_RST_PIN = board.D25
 
 # ==========================================
 # 3-STAGE VOICE ACTIVITY DETECTOR
 # ==========================================
-# WHY THIS BEATS THE ORIGINAL SYLLABLE COUNTER:
-#
-# The original only measured energy (loudness). Music constantly exceeds that
-# threshold, causing false triggers. This VAD adds two more checks:
-#
-# 1. Zero Crossing Rate (ZCR): counts how many times the signal crosses zero
-#    per second. Human voice lives in a specific ZCR range (0.04 - 0.35).
-#    Bass-heavy music has very LOW ZCR. High-frequency hiss has very HIGH ZCR.
-#    Both get filtered out automatically.
-#
-# 2. Spectral centroid ratio: voice energy concentrates in 300-3400 Hz.
-#    Music spreads across the full spectrum. We compare energy in the voice
-#    band vs total energy — voice has a high ratio, music has a low ratio.
-#
-# 3. Confirmation window: requires CONFIRM_CHUNKS consecutive positive
-#    detections before firing. A single drum hit or bass drop passes
-#    the energy test but fails the confirmation window.
-#
-# TUNING GUIDE (adjust these if needed):
-#   ENERGY_MULTIPLIER — raise if music causes false triggers, lower if voice is missed
-#   ZCR_MIN / ZCR_MAX — widen if deep male voices are missed (lower ZCR_MIN to 0.02)
-#   CONFIRM_CHUNKS    — raise for noisy environments, lower for faster response
-#   SILENCE_CHUNKS    — raise if commands get cut off mid-word
-
 class VAD:
-    NOISE_ALPHA       = 0.97   # Noise floor adaptation speed (higher = slower)
-    ENERGY_MULTIPLIER = 3.5    # Voice must be this many times above noise floor
-    ZCR_MIN           = 0.04   # Minimum ZCR for voice (raise to 0.06 for noisy rooms)
-    ZCR_MAX           = 0.35   # Maximum ZCR for voice
-    BAND_RATIO_MIN    = 0.55   # Minimum fraction of energy in voice band (300-3400Hz)
-    CONFIRM_CHUNKS    = 5      # Consecutive voice chunks before triggering
-    SILENCE_CHUNKS    = 18     # Consecutive silent chunks = end of speech
+    NOISE_ALPHA       = 0.97
+    ENERGY_MULTIPLIER = 3.5
+    ZCR_MIN           = 0.04
+    ZCR_MAX           = 0.35
+    BAND_RATIO_MIN    = 0.55
+    CONFIRM_CHUNKS    = 5
+    SILENCE_CHUNKS    = 18
 
     def __init__(self):
         self.noise_floor         = 0.02
@@ -119,8 +145,6 @@ class VAD:
         return np.sum(np.diff(np.sign(chunk)) != 0) / len(chunk)
 
     def _band_ratio(self, chunk):
-        # Ratio of voice-band energy to total energy.
-        # Cheap FFT-based check — reuses numpy's rfft.
         spec      = np.abs(np.fft.rfft(chunk))
         freqs     = np.fft.rfftfreq(len(chunk), 1.0 / RATE)
         voice_idx = (freqs >= 300) & (freqs <= 3400)
@@ -130,21 +154,17 @@ class VAD:
         return float(np.sum(spec[voice_idx] ** 2) / total_e)
 
     def update(self, chunk):
-        """
-        Returns: 'START', 'ACTIVE', 'END', or 'SILENT'
-        """
         energy = float(np.sqrt(np.mean(chunk ** 2)))
         zcr    = self._zcr(chunk)
 
-        # Update noise floor only in quiet moments
         if energy < self.noise_floor * 1.5:
             self.noise_floor = (self.NOISE_ALPHA * self.noise_floor +
                                 (1.0 - self.NOISE_ALPHA) * energy)
 
-        energy_ok    = energy > (self.noise_floor * self.ENERGY_MULTIPLIER)
-        zcr_ok       = self.ZCR_MIN < zcr < self.ZCR_MAX
-        band_ratio   = self._band_ratio(chunk) if energy_ok else 0.0
-        band_ok      = band_ratio > self.BAND_RATIO_MIN
+        energy_ok  = energy > (self.noise_floor * self.ENERGY_MULTIPLIER)
+        zcr_ok     = self.ZCR_MIN < zcr < self.ZCR_MAX
+        band_ratio = self._band_ratio(chunk) if energy_ok else 0.0
+        band_ok    = band_ratio > self.BAND_RATIO_MIN
 
         is_voice = energy_ok and zcr_ok and band_ok
 
@@ -229,27 +249,14 @@ state = RobotState()
 # ==========================================
 # TWO-STAGE AUDIO CAPTURE BUFFER
 # ==========================================
-# WHY TWO BUFFERS:
-#
-# pre_buffer — Always rolling. Stores the last PRE_BUFFER_SEC seconds.
-#   When VAD fires START we already missed the first ~160ms of the word
-#   (the confirmation window takes time). The pre_buffer captures that
-#   audio so we can prepend it — Google gets the COMPLETE utterance
-#   including the very first phoneme. Without this, "forward" might
-#   arrive as "orward" and fail to match.
-#
-# capture_buffer — Accumulates audio only while speech is active.
-#   Cleared and sent to Google when VAD fires END.
-#   Maximum 3 seconds to prevent runaway captures.
-
 PRE_BUFFER_SEC  = 0.7
 CAPTURE_MAX_SEC = 3.0
 
-_pre_buf_lock    = threading.Lock()
-_pre_buf         = collections.deque(maxlen=int(RATE * PRE_BUFFER_SEC / CHUNK))
-_capture_buf     = []
-_capturing       = False
-_capture_start   = 0.0
+_pre_buf_lock  = threading.Lock()
+_pre_buf       = collections.deque(maxlen=int(RATE * PRE_BUFFER_SEC / CHUNK))
+_capture_buf   = []
+_capturing     = False
+_capture_start = 0.0
 
 # ==========================================
 # YAMNET AI ENGINE
@@ -271,20 +278,9 @@ audio_buffer   = np.zeros(RATE * 3, dtype=np.float32)
 # SPEECH RECOGNIZER + CALIBRATION
 # ==========================================
 recognizer = sr.Recognizer()
-recognizer.dynamic_energy_threshold = False  # Prevents mid-session recalibration
-                                             # (music volume changes would
-                                             #  confuse the adaptive threshold)
+recognizer.dynamic_energy_threshold = False
 
 def calibrate_recognizer():
-    """
-    Records 2 seconds of ambient audio at startup and sets the energy
-    threshold from the actual noise floor of your microphone and room.
-    This is far better than a hardcoded value because:
-    - Different mics have different sensitivities
-    - Different rooms have different ambient noise
-    - Music playing in the background shifts the baseline
-    Called once before threads start — does NOT run in background.
-    """
     print("Calibrating microphone (2 seconds of silence please)...")
     mic = sc.default_microphone()
     samples = []
@@ -324,21 +320,12 @@ def run_yamnet_periodically():
 # ==========================================
 # COMMAND MATCHING + GOOGLE SPEECH
 # ==========================================
-# AUDIO NORMALIZATION: before sending to Google we normalize the amplitude.
-# If you speak quietly (or are far from the mic) the raw audio is low-amplitude.
-# Google's acoustic model performs better on normalized audio because
-# it was trained on consistently-leveled samples.
-# Peak normalization to 90% of full scale — loud but not clipping.
-
 def _normalize(audio_float32):
     peak = np.max(np.abs(audio_float32))
     if peak > 0.01:
         return audio_float32 / peak * 0.9
     return audio_float32
 
-# Command table: keyword → (esp32_command, tts_phrase)
-# Written as a list so multi-keyword entries can share a single action.
-# Order matters — checked top to bottom, first match wins.
 COMMANDS = [
     (["forward",  "advance"],                   "WALK_FORWARD",   "walking forward"),
     (["backward", "back",   "reverse"],         "WALK_BACKWARD",  "walking backward"),
@@ -369,7 +356,11 @@ def process_voice_command(audio_bytes):
                     say_phrase_offline(phrase)
                     with state.lock:
                         state.command_detected_time = time.time()
-                        state.voice_override_until  = time.time() + 12.0
+                        # FIX: Extended override window to 15s (was 12s).
+                        # The ACK protocol now enforces sequencing anyway,
+                        # but a longer window prevents beat-sync from firing
+                        # a new dance command before the voice command finishes.
+                        state.voice_override_until  = time.time() + 15.0
                         state.beat_tracker.bpm_history.clear()
                     print(f"Executed: {cmd}")
                     matched = True
@@ -377,7 +368,11 @@ def process_voice_command(audio_bytes):
 
             if not matched:
                 print(f"No command matched: '{text}'")
-            break   # Don't retry on successful transcription, even if unmatched
+                # FIX: If no command matched, unblock the ready event so
+                # beat-sync can resume immediately (no command was sent,
+                # so no READY will arrive from ESP32).
+                _esp32_ready.set()
+            break
 
         except sr.UnknownValueError:
             print(f"Could not understand (attempt {attempt+1}/3)")
@@ -385,9 +380,12 @@ def process_voice_command(audio_bytes):
                 time.sleep(0.08)
         except sr.RequestError as e:
             print(f"Google API error: {e}")
+            # FIX: Unblock on API error (no command was sent).
+            _esp32_ready.set()
             break
         except Exception as e:
             print(f"Error: {e}")
+            _esp32_ready.set()
             break
 
     with state.lock:
@@ -435,9 +433,9 @@ def audio_listener():
 
     with mic.recorder(samplerate=RATE, channels=1) as recorder:
         while True:
-            raw          = recorder.record(numframes=CHUNK)
-            chunk        = raw.flatten().astype(np.float32)
-            now          = time.time()
+            raw   = recorder.record(numframes=CHUNK)
+            chunk = raw.flatten().astype(np.float32)
+            now   = time.time()
 
             # Rolling buffer for YAMNet
             audio_buffer = np.roll(audio_buffer, -CHUNK)
@@ -459,7 +457,6 @@ def audio_listener():
                 if vad_result == 'START' and not _capturing:
                     _capturing     = True
                     _capture_start = now
-                    # Prepend pre-buffer: captures audio before trigger fired
                     with _pre_buf_lock:
                         _capture_buf = [c.copy() for c in _pre_buf]
                     _capture_buf.append(chunk.copy())
@@ -476,7 +473,6 @@ def audio_listener():
                     _trigger_recognition()
 
             elif _capturing:
-                # Voice override activated mid-capture — discard
                 _capturing   = False
                 _capture_buf = []
                 state.vad.reset()
@@ -498,13 +494,17 @@ def audio_listener():
 
             # Beat-synced choreography
             with state.lock:
-                t             = time.time()
-                overdue       = (t - state.last_dance_command_time) >= state.dance_interval
-                free          = t > state.voice_override_until and not state.voice_active
-                has_beats     = len(state.beat_tracker.bpm_history) >= 3
-                confident     = state.beat_tracker.beat_confidence > 0.4
+                t         = time.time()
+                overdue   = (t - state.last_dance_command_time) >= state.dance_interval
+                free      = t > state.voice_override_until and not state.voice_active
+                has_beats = len(state.beat_tracker.bpm_history) >= 3
+                confident = state.beat_tracker.beat_confidence > 0.4
 
-                if overdue and free and has_beats and confident:
+                # FIX: Also gate on _esp32_ready so we don't queue a beat-sync
+                # command while the ESP32 is still executing the previous one.
+                esp32_free = _esp32_ready.is_set()
+
+                if overdue and free and has_beats and confident and esp32_free:
                     bpm_val = state.beat_tracker.get_valid_bpm()
                     genre   = state.genre
                     slow    = ["Acoustic","Vocal","Speech","Choir","Folk","Singer","Ballad","Blues"]
@@ -555,20 +555,20 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 
 def display_loop():
     os.system("amixer set Master 100% > /dev/null 2>&1")
-    disp              = init_display()
-    eye_w, eye_h      = 70, 120
-    lx, rx            = 90, 230
-    cy                = 120
-    blink_timer       = time.time()
-    is_blinking       = False
+    disp         = init_display()
+    eye_w, eye_h = 70, 120
+    lx, rx       = 90, 230
+    cy           = 120
+    blink_timer  = time.time()
+    is_blinking  = False
 
     while True:
         with state.lock:
-            speed        = state.music_speed
-            beat_active  = state.beat_hit
-            va           = state.voice_active
-            cmd_t        = state.command_detected_time
-            bpm          = state.bpm
+            speed       = state.music_speed
+            beat_active = state.beat_hit
+            va          = state.voice_active
+            cmd_t       = state.command_detected_time
+            bpm         = state.bpm
             state.beat_hit = False
 
         dt = time.time() - cmd_t
@@ -580,7 +580,7 @@ def display_loop():
         if bpm > 0:
             draw.text((10,10), f"{bpm:.0f}", fill=(100,100,100))
 
-        h  = eye_h
+        h   = eye_h
         col = (0,255,255)
         cy_r = cy
 
@@ -613,6 +613,7 @@ def display_loop():
 # STARTUP
 # ==========================================
 calibrate_recognizer()
-threading.Thread(target=run_yamnet_periodically, daemon=True).start()
-threading.Thread(target=audio_listener,          daemon=True).start()
+threading.Thread(target=esp32_reader_thread,      daemon=True).start()
+threading.Thread(target=run_yamnet_periodically,  daemon=True).start()
+threading.Thread(target=audio_listener,           daemon=True).start()
 display_loop()
