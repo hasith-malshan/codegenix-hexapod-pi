@@ -35,13 +35,55 @@ from adafruit_rgb_display import ili9341 as ili9341
 # ==========================================
 # USB SERIAL CONNECTION
 # ==========================================
-print("Connecting to ESP32 over USB...")
-try:
-    esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    print("Connected to ESP32 on /dev/ttyUSB0")
-except Exception as e:
-    print(f"Failed to connect: {e}")
-    esp32_serial = None
+# ==========================================
+# USB SERIAL CONNECTION — AUTO DETECT
+# ==========================================
+# Scans all likely ESP32 port names and keeps the first one that opens.
+# Does NOT open-close-reopen (that causes silent failures on some systems
+# and triggers an ESP32 hardware reset on boards with DTR auto-reset).
+#
+# Port priority:
+#   /dev/ttyUSB*  — CP2102/CP2104 chip (most ESP32 DevKit boards)
+#   /dev/ttyACM*  — CDC ACM (ESP32-S2/S3 native USB)
+#   /dev/tty.usbserial* — macOS
+#
+# After opening, we flush buffers and wait 100ms for the ESP32 to
+# finish any reset triggered by the DTR line toggling on connect.
+
+def _open_esp32():
+    import glob
+    candidates = (
+        glob.glob('/dev/ttyUSB*') +
+        glob.glob('/dev/ttyACM*') +
+        glob.glob('/dev/tty.usbserial*') +
+        glob.glob('/dev/tty.SLAB_USBtoUART*')
+    )
+    candidates.sort()
+    for port in candidates:
+        try:
+            s = serial.Serial(
+                port,
+                baudrate=115200,
+                timeout=1,
+                write_timeout=2,
+                dsrdtr=False,    # Don't toggle DTR — prevents unwanted ESP32 reset
+                rtscts=False,
+            )
+            s.reset_input_buffer()
+            s.reset_output_buffer()
+            time.sleep(0.1)      # Let ESP32 settle after open
+            print(f"ESP32 connected on {port}")
+            return s
+        except Exception as e:
+            print(f"  {port}: {e}")
+            continue
+    return None
+
+print("Scanning for ESP32...")
+esp32_serial = _open_esp32()
+if esp32_serial is None:
+    print("ESP32 not found — running without serial (dance/walk disabled).")
+    print("Fix: check USB cable (must be data cable), run 'dmesg | tail -20' after plugging in.")
 
 # ==========================================
 # FIX: ACK-GATED COMMAND SENDER
@@ -63,9 +105,21 @@ except Exception as e:
 # ==========================================
 
 _esp32_ready      = threading.Event()
-_esp32_ready.set()   # Initially ready (ESP32 sends READY on boot)
+# Start as NOT ready. The reader thread will set it when ESP32 sends
+# "READY" on boot. If the boot READY was already missed (ESP32 was
+# powered before Python started), we set a 3-second fallback timer
+# so the first command isn't blocked forever.
 _send_lock        = threading.Lock()
-READY_TIMEOUT_SEC = 8.0
+READY_TIMEOUT_SEC = 10.0
+
+def _esp32_ready_fallback():
+    """If no READY received within 3 seconds of startup, assume ESP32
+    is already running and unblock the gate. This handles the case where
+    the ESP32 booted before Python connected to the serial port."""
+    time.sleep(3.0)
+    if not _esp32_ready.is_set():
+        print("No READY from ESP32 within 3s — assuming already running, unblocking.")
+        _esp32_ready.set()
 
 # Priority levels — higher number = higher priority.
 # Voice commands (PRIORITY_VOICE) always interrupt beat-sync (PRIORITY_BEAT).
@@ -98,15 +152,12 @@ def send_to_esp32(command, priority=PRIORITY_BEAT):
 
     Priority rules:
     - PRIORITY_VOICE: always sends; waits up to READY_TIMEOUT_SEC for READY.
-    - PRIORITY_BEAT:  dropped silently if voice_override_until is in the future
-                      (a voice command is running or just finished).
-    This prevents beat-sync from firing a second serial command while the
-    ESP32 is still executing a freshly-issued voice command.
+    - PRIORITY_BEAT:  dropped if voice_override_until is still in the future.
     """
     if not (esp32_serial and esp32_serial.is_open):
+        print(f"SERIAL NOT OPEN — dropped: {command}")
         return
     with _send_lock:
-        # Drop low-priority beat commands during voice override window
         if priority == PRIORITY_BEAT:
             with state.lock:
                 override_active = time.time() < state.voice_override_until
@@ -114,15 +165,20 @@ def send_to_esp32(command, priority=PRIORITY_BEAT):
                 print(f"Dropped beat command '{command}' (voice override active)")
                 return
 
-        if not _esp32_ready.wait(timeout=READY_TIMEOUT_SEC):
-            print(f"WARNING: ESP32 READY timeout — sending '{command}' anyway")
+        ready = _esp32_ready.wait(timeout=READY_TIMEOUT_SEC)
+        if not ready:
+            print(f"WARNING: ESP32 READY timeout after {READY_TIMEOUT_SEC}s — sending '{command}' anyway")
+        else:
+            print(f"ESP32 ready — sending: {command}")
+
         _esp32_ready.clear()
         try:
             esp32_serial.write((command + "\n").encode('utf-8'))
-            print(f"Sent: {command}")
+            esp32_serial.flush()   # Force bytes out of OS buffer immediately
+            print(f"Sent OK: {command}")
         except Exception as e:
             print(f"Send failed: {e}")
-            _esp32_ready.set()   # Unblock on error
+            _esp32_ready.set()
 
 # ==========================================
 # AUDIO CONFIG
@@ -660,6 +716,8 @@ def display_loop():
 calibrate_recognizer()
 _init_tts()
 threading.Thread(target=esp32_reader_thread,      daemon=True).start()
+threading.Thread(target=_esp32_ready_fallback,    daemon=True).start()
+threading.Thread(target=run_yamnet_periodically,  daemon=True).start()
 threading.Thread(target=run_yamnet_periodically,  daemon=True).start()
 threading.Thread(target=audio_listener,           daemon=True).start()
 display_loop()
