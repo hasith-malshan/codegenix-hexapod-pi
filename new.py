@@ -67,6 +67,13 @@ _esp32_ready.set()   # Initially ready (ESP32 sends READY on boot)
 _send_lock        = threading.Lock()
 READY_TIMEOUT_SEC = 8.0
 
+# Priority levels — higher number = higher priority.
+# Voice commands (PRIORITY_VOICE) always interrupt beat-sync (PRIORITY_BEAT).
+# send_to_esp32() drops an incoming beat-sync command if a voice command
+# is in-flight (i.e. voice_override_until is still in the future).
+PRIORITY_BEAT  = 0
+PRIORITY_VOICE = 1
+
 def esp32_reader_thread():
     """Background thread: reads all serial output from ESP32.
     Sets _esp32_ready when 'READY' is received.
@@ -86,13 +93,27 @@ def esp32_reader_thread():
         else:
             time.sleep(0.1)
 
-def send_to_esp32(command):
+def send_to_esp32(command, priority=PRIORITY_BEAT):
     """Send a command only after the ESP32 signals it is ready.
-    Blocks for up to READY_TIMEOUT_SEC seconds waiting for READY.
+
+    Priority rules:
+    - PRIORITY_VOICE: always sends; waits up to READY_TIMEOUT_SEC for READY.
+    - PRIORITY_BEAT:  dropped silently if voice_override_until is in the future
+                      (a voice command is running or just finished).
+    This prevents beat-sync from firing a second serial command while the
+    ESP32 is still executing a freshly-issued voice command.
     """
     if not (esp32_serial and esp32_serial.is_open):
         return
     with _send_lock:
+        # Drop low-priority beat commands during voice override window
+        if priority == PRIORITY_BEAT:
+            with state.lock:
+                override_active = time.time() < state.voice_override_until
+            if override_active:
+                print(f"Dropped beat command '{command}' (voice override active)")
+                return
+
         if not _esp32_ready.wait(timeout=READY_TIMEOUT_SEC):
             print(f"WARNING: ESP32 READY timeout — sending '{command}' anyway")
         _esp32_ready.clear()
@@ -292,16 +313,34 @@ def calibrate_recognizer():
     recognizer.energy_threshold = max(300, noise * 8 * 32767)
     print(f"Calibrated. Noise floor: {noise:.4f} | SR threshold: {recognizer.energy_threshold:.0f}")
 
+# Persistent pyttsx3 engine — created once and reused.
+# Creating a new engine per call causes a ReferenceError crash in the
+# espeak backend: the C library fires a callback after Python has already
+# garbage-collected the engine object. Using a single long-lived instance
+# and a lock prevents both the crash and concurrent runAndWait() calls.
+_tts_engine = None
+_tts_lock   = threading.Lock()
+
+def _init_tts():
+    global _tts_engine
+    try:
+        _tts_engine = pyttsx3.init()
+        _tts_engine.setProperty('rate', 145)
+        _tts_engine.setProperty('volume', 1.0)
+    except Exception as e:
+        print(f"TTS init failed: {e}")
+        _tts_engine = None
+
 def say_phrase_offline(text):
     def _speak():
-        try:
-            e = pyttsx3.init()
-            e.setProperty('rate', 145)
-            e.setProperty('volume', 1.0)
-            e.say(text)
-            e.runAndWait()
-        except:
-            pass
+        with _tts_lock:
+            if _tts_engine is None:
+                return
+            try:
+                _tts_engine.say(text)
+                _tts_engine.runAndWait()
+            except Exception as e:
+                print(f"TTS error: {e}")
     threading.Thread(target=_speak, daemon=True).start()
 
 # ==========================================
@@ -327,17 +366,23 @@ def _normalize(audio_float32):
     return audio_float32
 
 COMMANDS = [
-    (["forward",  "advance"],                   "WALK_FORWARD",   "walking forward"),
-    (["backward", "back",   "reverse"],         "WALK_BACKWARD",  "walking backward"),
-    (["left"],                                  "TURN_LEFT",      "turning left"),
-    (["right"],                                 "TURN_RIGHT",     "turning right"),
-    (["stop",     "stand",  "halt"],            "STAND",          "stopping"),
-    (["dance",    "party",  "groove"],          "DANCE_CIRCLE",   "lets party"),
-    (["slow",     "acoustic","ballad"],         "DANCE_ROLL_SLOW","slow mode"),
-    (["fast",     "speed",  "rapid", "quick"],  "DANCE_ROLL_FAST","high speed"),
-    (["twist"],                                 "DANCE_TWIST",    "doing the twist"),
-    (["wave",     "hello"],                     "DANCE_WAVE",     "waving hello"),
-    (["circle",   "spin"],                      "DANCE_CIRCLE_2", "spinning around"),
+    (["forward",  "advance"],                          "WALK_FORWARD",   "walking forward"),
+    (["backward", "back",    "reverse"],               "WALK_BACKWARD",  "walking backward"),
+    (["left"],                                         "TURN_LEFT",      "turning left"),
+    (["right"],                                        "TURN_RIGHT",     "turning right"),
+    (["stop",     "stand",   "halt"],                  "STAND",          "stopping"),
+    # FIX: removed bare "dance" — too easy to false-match on music lyrics
+    # or repeated words like "dance dance". Now requires a more specific word.
+    (["party",    "groove",  "boogie"],                "DANCE_CIRCLE",   "lets party"),
+    (["slow",     "acoustic","ballad"],                "DANCE_ROLL_SLOW","slow mode"),
+    (["fast",     "speed",   "rapid",  "quick"],       "DANCE_ROLL_FAST","high speed"),
+    (["twist"],                                        "DANCE_TWIST",    "doing the twist"),
+    (["wave",     "hello",   "hi"],                    "DANCE_WAVE",     "waving hello"),
+    (["circle",   "spin",    "rotate", "pirouette"],   "DANCE_CIRCLE_2", "spinning around"),
+    (["ripple",   "wiggle"],                           "DANCE_RIPPLE",   "doing the ripple"),
+    (["salsa",    "tango",   "samba"],                 "DANCE_SALSA",    "lets salsa"),
+    (["peacock",  "strut",   "spread"],                "DANCE_PEACOCK",  "doing the peacock"),
+    (["roll",     "rock"],                             "DANCE_ROLL",     "rolling"),
 ]
 
 def process_voice_command(audio_bytes):
@@ -352,7 +397,7 @@ def process_voice_command(audio_bytes):
             matched = False
             for keywords, cmd, phrase in COMMANDS:
                 if any(kw in text for kw in keywords):
-                    send_to_esp32(cmd)
+                    send_to_esp32(cmd, priority=PRIORITY_VOICE)
                     say_phrase_offline(phrase)
                     with state.lock:
                         state.command_detected_time = time.time()
@@ -613,6 +658,7 @@ def display_loop():
 # STARTUP
 # ==========================================
 calibrate_recognizer()
+_init_tts()
 threading.Thread(target=esp32_reader_thread,      daemon=True).start()
 threading.Thread(target=run_yamnet_periodically,  daemon=True).start()
 threading.Thread(target=audio_listener,           daemon=True).start()
