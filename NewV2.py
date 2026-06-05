@@ -57,8 +57,11 @@ from adafruit_rgb_display import ili9341
 ALSA_CARD     = 0       # from arecord -l: card 0: sndrpigooglevoi
 ALSA_DEVICE   = 0       # device 0
 ALSA_CHANNELS = 2       # Google Voice HAT exposes 2 input channels (confirmed by PyAudio query)
-RATE          = 16000
-CHUNK         = 512
+HW_RATE       = 48000   # HAT only accepts 48000 Hz — does NOT support 16000 Hz natively
+RATE          = 16000   # internal pipeline rate (aubio, VAD, YAMNet all expect 16kHz)
+DOWNSAMPLE    = HW_RATE // RATE   # = 3  (take every 3rd sample after stereo->mono)
+CHUNK         = 512     # pipeline chunk size at 16kHz
+CHUNK_HW      = CHUNK * DOWNSAMPLE  # frames to read from hardware at 48kHz
 
 def _find_pyaudio_device(pa):
     """
@@ -649,19 +652,21 @@ def _run_audio_loop():
 
     stream = pa.open(
         format=pyaudio.paFloat32,
-        channels=ALSA_CHANNELS,   # 2 — Google Voice HAT requires stereo open
-        rate=RATE,
+        channels=ALSA_CHANNELS,   # 2 — HAT requires stereo
+        rate=HW_RATE,             # 48000 — only rate the HAT accepts
         input=True,
         input_device_index=device_idx,
-        frames_per_buffer=CHUNK,
+        frames_per_buffer=CHUNK_HW,   # read 1536 frames at 48kHz = 512 at 16kHz
     )
 
     try:
         while True:
-            raw    = stream.read(CHUNK, exception_on_overflow=False)
-            # Stereo -> mono: CHUNK*ALSA_CHANNELS interleaved samples -> mean across channels
+            raw    = stream.read(CHUNK_HW, exception_on_overflow=False)
+            # Step 1: stereo interleaved (CHUNK_HW*2 floats) -> mono by averaging channels
             stereo = np.frombuffer(raw, dtype=np.float32).reshape(-1, ALSA_CHANNELS)
-            chunk  = stereo.mean(axis=1)   # shape (CHUNK,) mono float32
+            mono   = stereo.mean(axis=1)           # shape (CHUNK_HW,) at 48kHz
+            # Step 2: downsample 48kHz -> 16kHz by taking every DOWNSAMPLE-th sample
+            chunk  = mono[::DOWNSAMPLE].copy()     # shape (CHUNK,) at 16kHz
             now    = time.time()
 
             # Silence / stale-device detector
