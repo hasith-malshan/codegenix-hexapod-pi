@@ -510,7 +510,15 @@ MANUAL_COMMANDS = {
     20: ("DANCE_BELLY_CRAWL", "NEW: Low-Rider Belly Crawl"),
     21: ("DANCE_PITCH_PIVOT", "NEW: Pitch & Pivot Sway"),
     22: ("DANCE_TWITCH", "NEW: High-Frequency Twitch/Shiver"),
-    23: ("DANCE_WORM", "NEW: Brownian Ripple Worm")
+    23: ("DANCE_WORM", "NEW: Brownian Ripple Worm"),
+
+    # ====== NEW INDIVIDUAL LEG DIAGNOSTICS ======
+    24: ("TEST_LEG_0", "DIAGNOSTIC: Test Leg 0 (Front Left)"),
+    25: ("TEST_LEG_1", "DIAGNOSTIC: Test Leg 1 (Mid Left)"),
+    26: ("TEST_LEG_2", "DIAGNOSTIC: Test Leg 2 (Back Left)"),
+    27: ("TEST_LEG_3", "DIAGNOSTIC: Test Leg 3 (Front Right)"),
+    28: ("TEST_LEG_4", "DIAGNOSTIC: Test Leg 4 (Mid Right)"),
+    29: ("TEST_LEG_5", "DIAGNOSTIC: Test Leg 5 (Back Right)")
 }
 
 def manual_testing_loop():
