@@ -44,34 +44,14 @@ except Exception as e:
     esp32_serial = None
 
 # ==========================================
-# FIX: ACK-GATED COMMAND SENDER
-#
-# ORIGINAL BUG: send_to_esp32() wrote commands directly with no
-# flow control. If a beat-sync move fired while a previous dance
-# was still running on the ESP32, the ESP32 received two commands
-# in quick succession. It processed the first immediately and the
-# second arrived mid-motion — causing processCommand() to set a
-# new currentState while smoothLegsToTarget() was mid-loop.
-# checkStop() only polled every 3rd step, so the ESP32 sometimes
-# missed the new command entirely and continued with the old move.
-#
-# FIX: After every command we wait for "READY\n" from the ESP32
-# before allowing the next command to be sent. A background thread
-# reads the serial port continuously. send_to_esp32() queues
-# commands and only releases them when the ESP32 is ready.
-# A timeout of 8 seconds prevents a deadlock if READY is lost.
+# ACK-GATED COMMAND SENDER
 # ==========================================
-
 _esp32_ready      = threading.Event()
-_esp32_ready.set()   # Initially ready (ESP32 sends READY on boot)
+_esp32_ready.set()
 _send_lock        = threading.Lock()
 READY_TIMEOUT_SEC = 8.0
 
 def esp32_reader_thread():
-    """Background thread: reads all serial output from ESP32.
-    Sets _esp32_ready when 'READY' is received.
-    Prints everything else for debugging.
-    """
     while True:
         if esp32_serial and esp32_serial.is_open:
             try:
@@ -87,9 +67,6 @@ def esp32_reader_thread():
             time.sleep(0.1)
 
 def send_to_esp32(command):
-    """Send a command only after the ESP32 signals it is ready.
-    Blocks for up to READY_TIMEOUT_SEC seconds waiting for READY.
-    """
     if not (esp32_serial and esp32_serial.is_open):
         return
     with _send_lock:
@@ -101,7 +78,7 @@ def send_to_esp32(command):
             print(f"Sent: {command}")
         except Exception as e:
             print(f"Send failed: {e}")
-            _esp32_ready.set()   # Unblock on error
+            _esp32_ready.set()
 
 # ==========================================
 # AUDIO CONFIG
@@ -327,17 +304,23 @@ def _normalize(audio_float32):
     return audio_float32
 
 COMMANDS = [
-    (["forward",  "advance"],                   "WALK_FORWARD",   "walking forward"),
-    (["backward", "back",   "reverse"],         "WALK_BACKWARD",  "walking backward"),
-    (["left"],                                  "TURN_LEFT",      "turning left"),
-    (["right"],                                 "TURN_RIGHT",     "turning right"),
-    (["stop",     "stand",  "halt"],            "STAND",          "stopping"),
-    (["dance",    "party",  "groove"],          "DANCE_CIRCLE",   "lets party"),
-    (["slow",     "acoustic","ballad"],         "DANCE_ROLL_SLOW","slow mode"),
-    (["fast",     "speed",  "rapid", "quick"],  "DANCE_ROLL_FAST","high speed"),
-    (["twist"],                                 "DANCE_TWIST",    "doing the twist"),
-    (["wave",     "hello"],                     "DANCE_WAVE",     "waving hello"),
-    (["circle",   "spin"],                      "DANCE_CIRCLE_2", "spinning around"),
+    (["forward",  "advance"],                          "WALK_FORWARD",   "walking forward"),
+    (["backward", "back",   "reverse"],                "WALK_BACKWARD",  "walking backward"),
+    (["left"],                                         "TURN_LEFT",      "turning left"),
+    (["right"],                                        "TURN_RIGHT",     "turning right"),
+    (["stop",     "stand",  "halt"],                   "STAND",          "stopping"),
+    (["dance",    "party",  "groove"],                 "DANCE_CIRCLE",   "lets party"),
+    (["slow",     "acoustic","ballad"],                "DANCE_ROLL_SLOW","slow mode"),
+    (["fast",     "speed",  "rapid", "quick"],         "DANCE_ROLL_FAST","high speed"),
+    (["twist"],                                        "DANCE_TWIST",    "doing the twist"),
+    (["wave",     "hello"],                            "DANCE_WAVE",     "waving hello"),
+    (["circle",   "spin"],                             "DANCE_CIRCLE_2", "spinning around"),
+    # New moves
+    (["crawl",    "creep",  "slow walk"],              "DANCE_CRAWL",    "creeping slowly"),
+    (["headbang", "bang",   "slam"],                   "DANCE_HEADBANG", "headbanging"),
+    (["strobe",   "flash"],                            "DANCE_STROBE",   "strobing"),
+    (["pulse",    "heartbeat", "expand"],              "DANCE_PULSE",    "pulsing"),
+    (["gallop",   "trot"],                             "DANCE_GALLOP",   "galloping"),
 ]
 
 def process_voice_command(audio_bytes):
@@ -356,10 +339,6 @@ def process_voice_command(audio_bytes):
                     say_phrase_offline(phrase)
                     with state.lock:
                         state.command_detected_time = time.time()
-                        # FIX: Extended override window to 15s (was 12s).
-                        # The ACK protocol now enforces sequencing anyway,
-                        # but a longer window prevents beat-sync from firing
-                        # a new dance command before the voice command finishes.
                         state.voice_override_until  = time.time() + 15.0
                         state.beat_tracker.bpm_history.clear()
                     print(f"Executed: {cmd}")
@@ -368,9 +347,6 @@ def process_voice_command(audio_bytes):
 
             if not matched:
                 print(f"No command matched: '{text}'")
-                # FIX: If no command matched, unblock the ready event so
-                # beat-sync can resume immediately (no command was sent,
-                # so no READY will arrive from ESP32).
                 _esp32_ready.set()
             break
 
@@ -380,7 +356,6 @@ def process_voice_command(audio_bytes):
                 time.sleep(0.08)
         except sr.RequestError as e:
             print(f"Google API error: {e}")
-            # FIX: Unblock on API error (no command was sent).
             _esp32_ready.set()
             break
         except Exception as e:
@@ -437,15 +412,12 @@ def audio_listener():
             chunk = raw.flatten().astype(np.float32)
             now   = time.time()
 
-            # Rolling buffer for YAMNet
             audio_buffer = np.roll(audio_buffer, -CHUNK)
             audio_buffer[-CHUNK:] = chunk
 
-            # Always update pre-buffer
             with _pre_buf_lock:
                 _pre_buf.append(chunk.copy())
 
-            # VAD on bandpass-filtered chunk
             vocal = bandpass(chunk)
 
             with state.lock:
@@ -499,9 +471,6 @@ def audio_listener():
                 free      = t > state.voice_override_until and not state.voice_active
                 has_beats = len(state.beat_tracker.bpm_history) >= 3
                 confident = state.beat_tracker.beat_confidence > 0.4
-
-                # FIX: Also gate on _esp32_ready so we don't queue a beat-sync
-                # command while the ESP32 is still executing the previous one.
                 esp32_free = _esp32_ready.is_set()
 
                 if overdue and free and has_beats and confident and esp32_free:
@@ -511,15 +480,24 @@ def audio_listener():
 
                     if any(s in genre for s in slow) or bpm_val < 100:
                         state.music_speed = "SLOW"
-                        move = random.choice(["DANCE_ROLL_SLOW","DANCE_PEACOCK","DANCE_WAVE","DANCE_RIPPLE"])
+                        move = random.choice([
+                            "DANCE_ROLL_SLOW", "DANCE_PEACOCK", "DANCE_WAVE", "DANCE_RIPPLE",
+                            "DANCE_CRAWL", "DANCE_HEADBANG"
+                        ])
                         print(f"SLOW {bpm_val:.0f} BPM -> {move}")
                     elif bpm_val < 130:
                         state.music_speed = "MEDIUM"
-                        move = random.choice(["DANCE_TWIST","DANCE_RIPPLE_2","DANCE_CIRCLE","DANCE_SALSA"])
+                        move = random.choice([
+                            "DANCE_TWIST", "DANCE_RIPPLE_2", "DANCE_CIRCLE", "DANCE_SALSA",
+                            "DANCE_GALLOP"
+                        ])
                         print(f"MEDIUM {bpm_val:.0f} BPM -> {move}")
                     else:
                         state.music_speed = "FAST"
-                        move = random.choice(["DANCE_ROLL_FAST","DANCE_TWIST_2","DANCE_CIRCLE_2"])
+                        move = random.choice([
+                            "DANCE_ROLL_FAST", "DANCE_TWIST_2", "DANCE_CIRCLE_2",
+                            "DANCE_STROBE", "DANCE_PULSE"
+                        ])
                         print(f"FAST {bpm_val:.0f} BPM -> {move}")
 
                     send_to_esp32(move)
