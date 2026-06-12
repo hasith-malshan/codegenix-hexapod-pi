@@ -35,12 +35,14 @@ from adafruit_rgb_display import ili9341 as ili9341
 # ==========================================
 # USB SERIAL CONNECTION
 # ==========================================
-print("Connecting to ESP32 over USB...")
+SERIAL_PORT = '/dev/ttyUSB0'  # CHANGE THIS TO '/dev/ttyACM0' IF NEEDED
+print(f"Connecting to ESP32 over {SERIAL_PORT}...")
 try:
-    esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    print("Connected to ESP32 on /dev/ttyUSB0")
+    esp32_serial = serial.Serial(SERIAL_PORT, 115200, timeout=1)
+    print(f"Connected to ESP32 on {SERIAL_PORT}")
 except Exception as e:
     print(f"Failed to connect: {e}")
+    print("WARNING: Manual mode will run, but no commands will physically reach the robot.")
     esp32_serial = None
 
 # ==========================================
@@ -61,13 +63,13 @@ def esp32_reader_thread():
                 elif line:
                     print(f"[ESP32] {line}")
             except Exception as e:
-                print(f"Serial read error: {e}")
                 time.sleep(0.1)
         else:
             time.sleep(0.1)
 
 def send_to_esp32(command):
     if not (esp32_serial and esp32_serial.is_open):
+        print(f" [Simulation] ESP32 Not Connected. Would have sent: {command}")
         return
     with _send_lock:
         if not _esp32_ready.wait(timeout=READY_TIMEOUT_SEC):
@@ -204,33 +206,46 @@ _capture_buf   = []
 _capturing     = False
 _capture_start = 0.0
 
-yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
-
-def get_class_names():
-    class_map_path = yamnet_model.class_map_path().numpy().decode('utf-8')
-    names = []
-    with tf.io.gfile.GFile(class_map_path) as f:
-        for row in csv.DictReader(f):
-            names.append(row['display_name'])
-    return names
-
-YAMNET_CLASSES = get_class_names()
 audio_buffer   = np.zeros(RATE * 3, dtype=np.float32)
 
 recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = False
 
+# LAZY LOAD YAMNET GLOBALS
+yamnet_model = None
+YAMNET_CLASSES = []
+
+def init_ai_models():
+    """Only called if Mode 1 is selected. Prevents crashes if Pi has no internet during Testing mode."""
+    global yamnet_model, YAMNET_CLASSES
+    print("Downloading/Loading YAMNet model from TensorFlow Hub. This requires Internet...")
+    try:
+        yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
+        class_map_path = yamnet_model.class_map_path().numpy().decode('utf-8')
+        names = []
+        with tf.io.gfile.GFile(class_map_path) as f:
+            for row in csv.DictReader(f):
+                names.append(row['display_name'])
+        YAMNET_CLASSES = names
+        print("YAMNet Loaded Successfully.")
+    except Exception as e:
+        print(f"\nCRITICAL ERROR: Failed to load YAMNet. Check Pi Internet connection. \nDetails: {e}")
+        os._exit(1)
+
 def calibrate_recognizer():
     print("\nCalibrating microphone (2 seconds of silence please)...")
-    mic = sc.default_microphone()
-    samples = []
-    with mic.recorder(samplerate=RATE, channels=1) as rec:
-        for _ in range(int(RATE * 2 / CHUNK)):
-            chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
-            samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
-    noise = float(np.percentile(samples, 75))
-    recognizer.energy_threshold = max(300, noise * 8 * 32767)
-    print(f"Calibrated. Noise floor: {noise:.4f} | SR threshold: {recognizer.energy_threshold:.0f}")
+    try:
+        mic = sc.default_microphone()
+        samples = []
+        with mic.recorder(samplerate=RATE, channels=1) as rec:
+            for _ in range(int(RATE * 2 / CHUNK)):
+                chunk = rec.record(numframes=CHUNK).flatten().astype(np.float32)
+                samples.append(float(np.sqrt(np.mean(bandpass(chunk) ** 2))))
+        noise = float(np.percentile(samples, 75))
+        recognizer.energy_threshold = max(300, noise * 8 * 32767)
+        print(f"Calibrated. Noise floor: {noise:.4f} | SR threshold: {recognizer.energy_threshold:.0f}")
+    except Exception as e:
+        print(f"Audio calibration failed (No mic found?): {e}")
 
 def say_phrase_offline(text):
     def _speak():
@@ -246,6 +261,7 @@ def say_phrase_offline(text):
 def run_yamnet_periodically():
     while True:
         time.sleep(4)
+        if yamnet_model is None: continue
         snap   = np.copy(audio_buffer)
         scores, _, _ = yamnet_model(snap)
         top    = int(np.argmax(np.mean(scores, axis=0)))
@@ -414,7 +430,12 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 
 def display_loop():
     os.system("amixer set Master 100% > /dev/null 2>&1")
-    disp = init_display()
+    try:
+        disp = init_display()
+    except Exception as e:
+        print(f"Failed to load display: {e}")
+        return
+        
     eye_w, eye_h = 70, 120
     lx, rx, cy = 90, 230, 120
     blink_timer = time.time()
@@ -532,8 +553,8 @@ if __name__ == "__main__":
     print("\n" + "="*50)
     print("      HEXAPOD STARTUP MENU")
     print("="*50)
-    print(" [1] Autonomous AI / Voice Dancer Mode")
-    print(" [2] Manual SSH Testing Mode (CLI Interface)")
+    print(" [1] Autonomous AI / Voice Dancer Mode (Needs Internet & Mic)")
+    print(" [2] Manual SSH Testing Mode (No Internet Needed)")
     print("="*50)
 
     try:
@@ -544,14 +565,15 @@ if __name__ == "__main__":
     threading.Thread(target=esp32_reader_thread, daemon=True).start()
 
     if mode == '1':
-        print("\nStarting AI Mode. Calibrating microphone...")
+        print("\nStarting AI Mode...")
+        init_ai_models()
         calibrate_recognizer()
         threading.Thread(target=run_yamnet_periodically, daemon=True).start()
         threading.Thread(target=audio_listener, daemon=True).start()
         display_loop() # Blocks main thread with display
 
     elif mode == '2':
-        print("\nStarting Testing Mode. Microphone is DISABLED.")
+        print("\nStarting Testing Mode. AI is DISABLED.")
         # Start display in a background thread so we can use CLI in main thread
         threading.Thread(target=display_loop, daemon=True).start()
         manual_testing_loop() # Blocks main thread with CLI UI
