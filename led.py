@@ -1,8 +1,9 @@
 from rpi_ws281x import PixelStrip, Color
 import time
 
-LED_COUNT = 60        # Change if different
-LED_PIN = 18          # GPIO18
+# LED configuration
+LED_COUNT = 60
+LED_PIN = 18
 LED_FREQ_HZ = 800000
 LED_DMA = 10
 LED_BRIGHTNESS = 100
@@ -21,19 +22,45 @@ strip = PixelStrip(
 
 strip.begin()
 
-def wheel(pos):
-    if pos < 85:
-        return Color(pos * 3, 255 - pos * 3, 0)
-    elif pos < 170:
-        pos -= 85
-        return Color(255 - pos * 3, 0, pos * 3)
-    else:
-        pos -= 170
-        return Color(0, pos * 3, 255 - pos * 3)
+def color_wipe(color, wait_ms=20):
+    for i in range(strip.numPixels()):
+        strip.setPixelColor(i, color)
+        strip.show()
+        time.sleep(wait_ms / 1000.0)
 
-while True:
+def rainbow(wait_ms=20):
     for j in range(256):
         for i in range(strip.numPixels()):
-            strip.setPixelColor(i, wheel((i + j) & 255))
+            pos = (i + j) & 255
+
+            if pos < 85:
+                color = Color(pos * 3, 255 - pos * 3, 0)
+            elif pos < 170:
+                pos -= 85
+                color = Color(255 - pos * 3, 0, pos * 3)
+            else:
+                pos -= 170
+                color = Color(0, pos * 3, 255 - pos * 3)
+
+            strip.setPixelColor(i, color)
+
         strip.show()
-        time.sleep(0.02)
+        time.sleep(wait_ms / 1000.0)
+
+try:
+    while True:
+        color_wipe(Color(255, 0, 0))   # Red
+        time.sleep(1)
+
+        color_wipe(Color(0, 255, 0))   # Green
+        time.sleep(1)
+
+        color_wipe(Color(0, 0, 255))   # Blue
+        time.sleep(1)
+
+        rainbow()
+
+except KeyboardInterrupt:
+    for i in range(strip.numPixels()):
+        strip.setPixelColor(i, Color(0, 0, 0))
+    strip.show()
