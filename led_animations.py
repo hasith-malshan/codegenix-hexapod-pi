@@ -8,7 +8,7 @@ import neopixel
 
 
 LED_PIN = board.D18
-NUM_LEDS = 60
+NUM_LEDS = 7
 BRIGHTNESS = 100 / 255
 COLOR_ORDER = neopixel.GRB
 
@@ -19,6 +19,22 @@ pixels = neopixel.NeoPixel(
     auto_write=False,
     pixel_order=COLOR_ORDER,
 )
+
+
+def log_animation(name, detail=None):
+    message = f"[{time.strftime('%H:%M:%S')}] {name}"
+    if detail:
+        message = f"{message} - {detail}"
+    print(message, flush=True)
+
+
+def log_frame(name, frame, total, detail=None, every=25):
+    if frame == 0 or frame == total - 1 or frame % every == 0:
+        progress = int(((frame + 1) / total) * 100)
+        message = f"{name}: frame {frame + 1}/{total} ({progress}%)"
+        if detail:
+            message = f"{message} - {detail}"
+        print(message, flush=True)
 
 
 def millis():
@@ -109,35 +125,48 @@ def heat_color(temperature):
 
 
 def rainbow():
-    for start_hue in range(256):
+    total_frames = 256
+    log_animation("Rainbow", "moving hue gradient across the strip")
+    for start_hue in range(total_frames):
         for index in range(NUM_LEDS):
             pixels[index] = hsv(start_hue + index * 7)
         pixels.show()
+        log_frame("Rainbow", start_hue, total_frames, f"start_hue={start_hue}")
         delay(20)
 
 
 def confetti():
-    for _ in range(300):
+    total_frames = 300
+    log_animation("Confetti", "random sparkles with fading trails")
+    for frame in range(total_frames):
         fade_to_black_by(10)
         pos = random.randrange(NUM_LEDS)
-        add_color(pos, hsv(random.randrange(256), 255, 255))
+        hue = random.randrange(256)
+        add_color(pos, hsv(hue, 255, 255))
         pixels.show()
+        log_frame("Confetti", frame, total_frames, f"sparkle_pos={pos}, hue={hue}")
         delay(20)
 
 
 def sinelon():
-    for _ in range(400):
+    total_frames = 400
+    log_animation("Sinelon", "scanner dot sweeping left and right")
+    for frame in range(total_frames):
         fade_to_black_by(20)
         pos = beatsin(13, 0, NUM_LEDS - 1)
-        add_color(pos, hsv(millis() // 10, 255, 255))
+        hue = millis() // 10
+        add_color(pos, hsv(hue, 255, 255))
         pixels.show()
+        log_frame("Sinelon", frame, total_frames, f"scanner_pos={pos}, hue={hue % 256}")
         delay(10)
 
 
 def bpm():
     beats_per_minute = 62
+    total_frames = 400
+    log_animation("BPM", f"pulsing party palette at {beats_per_minute} BPM")
 
-    for _ in range(400):
+    for frame in range(total_frames):
         beat = beatsin(beats_per_minute, 64, 255)
 
         for index in range(NUM_LEDS):
@@ -148,50 +177,69 @@ def bpm():
             )
 
         pixels.show()
+        log_frame("BPM", frame, total_frames, f"brightness_wave={beat}")
         delay(20)
 
 
 def juggle():
-    for _ in range(400):
+    total_frames = 400
+    log_animation("Juggle", "eight colored dots weaving through the strip")
+    for frame in range(total_frames):
         fade_to_black_by(20)
 
         dot_hue = 0
+        positions = []
         for index in range(8):
             pos = beatsin(index + 7, 0, NUM_LEDS - 1)
+            positions.append(pos)
             add_color(pos, hsv(dot_hue, 200, 255))
             dot_hue += 32
 
         pixels.show()
+        log_frame("Juggle", frame, total_frames, f"dot_positions={positions}", every=40)
         delay(20)
 
 
 def fire_effect():
     heat = [0] * NUM_LEDS
+    total_frames = 500
+    log_animation("Fire", "cooling, rising heat, and random sparks")
 
-    for _ in range(500):
+    for frame in range(total_frames):
         for index in range(NUM_LEDS):
             heat[index] = max(0, heat[index] - random.randrange(20))
 
         for index in range(NUM_LEDS - 1, 1, -1):
             heat[index] = (heat[index - 1] + heat[index - 2] + heat[index - 2]) // 3
 
+        spark_index = None
         if random.randrange(256) < 120:
-            index = random.randrange(min(7, NUM_LEDS))
-            heat[index] = min(255, heat[index] + random.randrange(160, 256))
+            spark_index = random.randrange(min(7, NUM_LEDS))
+            heat[spark_index] = min(255, heat[spark_index] + random.randrange(160, 256))
 
         for index in range(NUM_LEDS):
             pixels[index] = heat_color(heat[index])
 
         pixels.show()
+        hottest = max(heat)
+        detail = f"hottest={hottest}"
+        if spark_index is not None:
+            detail = f"{detail}, spark_pos={spark_index}"
+        log_frame("Fire", frame, total_frames, detail)
         delay(20)
 
 
 def clear_strip():
+    log_animation("Clear", "turning all LEDs off")
     pixels.fill((0, 0, 0))
     pixels.show()
 
 
 def main():
+    log_animation(
+        "Startup",
+        f"pin=GPIO18, leds={NUM_LEDS}, brightness={BRIGHTNESS:.2f}, order=GRB",
+    )
     try:
         while True:
             rainbow()
@@ -201,6 +249,7 @@ def main():
             juggle()
             fire_effect()
     except KeyboardInterrupt:
+        log_animation("Stopped", "keyboard interrupt received")
         clear_strip()
 
 
