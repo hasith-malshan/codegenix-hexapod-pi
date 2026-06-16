@@ -1,3 +1,5 @@
+print("Loading LED animation modules...", flush=True)
+
 import colorsys
 import math
 import random
@@ -6,6 +8,7 @@ import time
 import board
 import neopixel
 
+print("Modules loaded. Configuring NeoPixel strip...", flush=True)
 
 LED_PIN = board.D18
 NUM_LEDS = 7
@@ -19,6 +22,8 @@ pixels = neopixel.NeoPixel(
     auto_write=False,
     pixel_order=COLOR_ORDER,
 )
+
+print("NeoPixel strip configured. Starting animations...", flush=True)
 
 
 def log_animation(name, detail=None):
