@@ -39,8 +39,8 @@ class FakeImp:
 
 
 sys.modules['imp'] = FakeImp()
-# ------------------------------------
 
+# Standard Python Libraries
 import serial
 import soundcard as sc
 import numpy as np
@@ -60,9 +60,10 @@ import board
 import busio
 import digitalio
 from PIL import Image, ImageDraw
-
-# Legacy PIL-compatible SPI display driver
 from adafruit_rgb_display import ili9341 as ili9341
+
+# LED Libraries (CRUCIAL: Fixed the NameError)
+from rpi_ws281x import PixelStrip, Color, ws
 
 # ==========================================
 # 1. AUDIO CONFIGURATION
