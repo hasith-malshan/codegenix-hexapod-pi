@@ -1,5 +1,6 @@
 import sys
 import collections
+import traceback
 
 # Ensure sudo can find your packages
 sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
@@ -34,7 +35,7 @@ class FakeImp:
 sys.modules['imp'] = FakeImp()
 # ------------------------------------
 
-# Standard Python Libraries
+# Standard Libraries
 import serial
 import soundcard as sc
 import numpy as np
@@ -51,7 +52,7 @@ import math
 import random
 from scipy.signal import butter, lfilter
 
-# Display & Graphics Libraries
+# Display & Graphics
 import board
 import busio
 import digitalio
@@ -62,27 +63,11 @@ from adafruit_rgb_display import ili9341 as ili9341
 from rpi_ws281x import PixelStrip, Color, ws
 
 # ==========================================
-# 1. AUDIO CONFIGURATION
+# 1. HARDWARE CONFIGURATION
 # ==========================================
 RATE = 16000
 CHUNK = 256
 
-
-def butter_bandpass(lowcut, highcut, fs, order=4):
-    nyq = 0.5 * fs
-    b, a = butter(order, [lowcut / nyq, highcut / nyq], btype='band')
-    return b, a
-
-
-def butter_bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=4):
-    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
-    y = lfilter(b, a, data)
-    return np.ascontiguousarray(y, dtype=np.float32)
-
-
-# ==========================================
-# 2. HARDWARE WIRING
-# ==========================================
 DISPLAY_CS_PIN = board.CE0
 DISPLAY_DC_PIN = board.D24
 DISPLAY_RST_PIN = board.D25
@@ -94,7 +79,7 @@ LED_BRIGHTNESS = 100
 
 
 # ==========================================
-# 3. GLOBAL STATE
+# 2. GLOBAL STATE
 # ==========================================
 class RobotState:
     def __init__(self):
@@ -110,7 +95,7 @@ class RobotState:
         self.command_detected_time = 0.0
         self.body_roll = 0.0
 
-        self.manual_led_pattern = None  # Tracks CLI LED overrides
+        self.manual_led_pattern = None
 
         self.last_dance_command_time = time.time()
         self.voice_override_until = 0.0
@@ -122,7 +107,7 @@ state = RobotState()
 
 
 # ==========================================
-# 4. SETUP USB SERIAL (ESP32)
+# 3. FAST USB SERIAL (ESP32)
 # ==========================================
 def connect_to_esp32():
     print("\n🔌 Searching for ESP32 via USB...")
@@ -138,9 +123,6 @@ def connect_to_esp32():
 
 
 esp32_serial = connect_to_esp32()
-_esp32_ready = threading.Event()
-_esp32_ready.set()
-_send_lock = threading.Lock()
 
 
 def esp32_reader_thread():
@@ -150,12 +132,12 @@ def esp32_reader_thread():
                 line = esp32_serial.readline().decode('utf-8', errors='ignore').strip()
                 if line.startswith("TILT:"):
                     try:
-                        with state.lock:
-                            state.body_roll = float(line.split(":")[1])
+                        roll_val = float(line.split(":")[1])
+                        # FIX 1: Prevent NaN (Not a Number) from crashing the display thread
+                        if not math.isnan(roll_val) and not math.isinf(roll_val):
+                            with state.lock: state.body_roll = roll_val
                     except ValueError:
                         pass
-                elif line == "READY":
-                    _esp32_ready.set()
             except Exception:
                 time.sleep(0.1)
         else:
@@ -164,19 +146,17 @@ def esp32_reader_thread():
 
 def send_to_esp32(command):
     if not (esp32_serial and esp32_serial.is_open):
-        print(f" ⚠️ [Simulated] -> {command}")
         return
-    # We removed the restrictive _send_lock and wait() timeout!
     try:
+        # FIX 2: Removed Thread Locking entirely. Commands are now instant!
         esp32_serial.write((command + "\n").encode('utf-8'))
-        # Optional: uncomment the line below if you want to see every command sent in the console
-        # print(f"📡 [USB] Sent: {command}")
+        esp32_serial.flush()
     except Exception as e:
         print(f"❌ Serial write error: {e}")
 
 
 # ==========================================
-# 5. LED STRIP MATH & ANIMATION THREAD
+# 4. LED STRIP ENGINE
 # ==========================================
 strip = PixelStrip(NUM_LEDS, LED_PIN, 800000, 10, False, LED_BRIGHTNESS, LED_CHANNEL, ws.WS2811_STRIP_GRB)
 strip.begin()
@@ -205,53 +185,115 @@ def led_thread():
     frame = 0
     heat = [0] * NUM_LEDS
     while True:
-        with state.lock:
-            speed, va, cmd_t, manual_led = state.music_speed, state.voice_active, state.command_detected_time, state.manual_led_pattern
+        try:
+            with state.lock:
+                speed, va, cmd_t, manual_led = state.music_speed, state.voice_active, state.command_detected_time, state.manual_led_pattern
 
-        dt = time.time() - cmd_t
-        frame += 1
+            dt = time.time() - cmd_t
+            frame += 1
 
-        # SUCCESS FLASHES (Top Priority, ignores overrides)
-        if dt < 0.25:
-            for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 255, 255))
-            strip.show();
-            time.sleep(0.02);
-            continue
-        elif dt < 1.0:
-            for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, 50, 255))
-            strip.show();
-            time.sleep(0.02);
-            continue
+            if dt < 0.25:
+                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 255, 255))
+                strip.show();
+                time.sleep(0.02);
+                continue
+            elif dt < 1.0:
+                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, 50, 255))
+                strip.show();
+                time.sleep(0.02);
+                continue
 
-        # LISTENING MODE (Ignores overrides)
-        if va:
-            strip.setPixelColor(0, Color(0, 0, 0))
-            fade_to_black_by(60)
-            pos = frame % (NUM_LEDS * 2 - 2)
-            if pos >= NUM_LEDS: pos = NUM_LEDS * 2 - 2 - pos
-            strip.setPixelColor(pos, Color(0, 255, 50))
-            strip.show();
-            time.sleep(0.05);
-            continue
+            if va:
+                strip.setPixelColor(0, Color(0, 0, 0))
+                fade_to_black_by(60)
+                pos = frame % (NUM_LEDS * 2 - 2)
+                if pos >= NUM_LEDS: pos = NUM_LEDS * 2 - 2 - pos
+                strip.setPixelColor(pos, Color(0, 255, 50))
+                strip.show();
+                time.sleep(0.05);
+                continue
 
-        # --- CLI MANUAL LED OVERRIDES (All 16 Patterns) ---
-        if manual_led:
-            if manual_led == "rainbow":
-                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 18) % 256))
-            elif manual_led == "confetti":
-                fade_to_black_by(25)
-                if random.random() < 0.3: strip.setPixelColor(random.randint(0, NUM_LEDS - 1),
-                                                              hsv(random.randint(0, 255)))
-            elif manual_led == "sinelon":
-                fade_to_black_by(35)
-                strip.setPixelColor(beatsin(18, 0, NUM_LEDS - 1), hsv((frame * 8) % 256))
-            elif manual_led == "bpm":
-                beat = beatsin(90, 80, 255)
-                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((i * 24 + frame * 3) % 256, 255, beat))
-            elif manual_led == "juggle":
-                fade_to_black_by(40)
-                for d in range(4): strip.setPixelColor(beatsin(d + 8, 0, NUM_LEDS - 1, d * 0.6), hsv(d * 64))
-            elif manual_led == "fire":
+            # CLI Manual Overrides
+            if manual_led:
+                if manual_led == "rainbow":
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 18) % 256))
+                elif manual_led == "confetti":
+                    fade_to_black_by(25)
+                    if random.random() < 0.3: strip.setPixelColor(random.randint(0, NUM_LEDS - 1),
+                                                                  hsv(random.randint(0, 255)))
+                elif manual_led == "sinelon":
+                    fade_to_black_by(35)
+                    strip.setPixelColor(beatsin(18, 0, NUM_LEDS - 1), hsv((frame * 8) % 256))
+                elif manual_led == "bpm":
+                    beat = beatsin(90, 80, 255)
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((i * 24 + frame * 3) % 256, 255, beat))
+                elif manual_led == "juggle":
+                    fade_to_black_by(40)
+                    for d in range(4): strip.setPixelColor(beatsin(d + 8, 0, NUM_LEDS - 1, d * 0.6), hsv(d * 64))
+                elif manual_led == "fire":
+                    for i in range(NUM_LEDS): heat[i] = max(0, heat[i] - random.randrange(10, 35))
+                    for i in range(NUM_LEDS - 1, 1, -1): heat[i] = (heat[i - 1] + heat[i - 2] * 2) // 3
+                    if random.randrange(256) < 130:
+                        s = random.randrange(min(2, NUM_LEDS));
+                        heat[s] = min(255, heat[s] + random.randrange(160, 256))
+                    for i in range(NUM_LEDS):
+                        t = heat[i];
+                        ramp = (t & 0x3F) << 2
+                        c = Color(255, 255, ramp) if t > 0x80 else Color(255, ramp, 0) if t > 0x40 else Color(ramp, 0,
+                                                                                                              0)
+                        strip.setPixelColor(i, c)
+                elif manual_led == "color_wipe":
+                    colors = [Color(255, 0, 0), Color(0, 255, 0), Color(0, 0, 255), Color(255, 100, 0)]
+                    ci = (frame // (NUM_LEDS * 4)) % 4
+                    pos = (frame // 4) % NUM_LEDS
+                    strip.setPixelColor(pos, colors[ci])
+                elif manual_led == "theater_chase":
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 20) % 256) if (i + (
+                                frame // 3)) % 3 == 0 else Color(0, 0, 0))
+                elif manual_led == "comet":
+                    fade_to_black_by(50)
+                    pos = frame % (NUM_LEDS * 2 - 2)
+                    pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
+                    strip.setPixelColor(pos, hsv((frame * 5) % 256))
+                elif manual_led == "dual_scanner":
+                    fade_to_black_by(65)
+                    pos = frame % (NUM_LEDS * 2 - 2)
+                    pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
+                    strip.setPixelColor(pos, Color(255, 20, 0))
+                    strip.setPixelColor(NUM_LEDS - 1 - pos, Color(0, 60, 255))
+                elif manual_led == "breathing":
+                    lvl = (math.sin(frame * 0.05) + 1) / 2
+                    c_val = int(20 + lvl * 100)
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, int(c_val * 2.5)))
+                elif manual_led == "sparkle_burst":
+                    if frame % 40 == 0:
+                        for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, 0, 0))
+                        for _ in range(random.randint(2, NUM_LEDS)): strip.setPixelColor(
+                            random.randint(0, NUM_LEDS - 1), hsv(random.randint(0, 255)))
+                    else:
+                        fade_to_black_by(30)
+                elif manual_led == "strobe":
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 11) % 256, 100, 255) if (
+                                                                                                                      frame // 3) % 2 == 0 else Color(
+                        0, 0, 0))
+                elif manual_led == "wave":
+                    for i in range(NUM_LEDS):
+                        lvl = (math.sin(frame * 0.18 - i * 0.9) + 1) / 2
+                        strip.setPixelColor(i, hsv((frame * 2 + i * 16) % 256, 230, int(25 + lvl * 230)))
+                elif manual_led == "alternating":
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 0, 80) if (i + (
+                                frame // 10)) % 2 == 0 else Color(0, 180, 255))
+                elif manual_led == "random_palette":
+                    if frame % 100 == 0 or not hasattr(state, 'rand_pal'): state.rand_pal = [hsv(random.randint(0, 255))
+                                                                                             for _ in range(4)]
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, state.rand_pal[i % 4])
+
+                strip.show();
+                time.sleep(0.03);
+                continue
+
+            # Auto Music Sync
+            if speed == "FAST":
                 for i in range(NUM_LEDS): heat[i] = max(0, heat[i] - random.randrange(10, 35))
                 for i in range(NUM_LEDS - 1, 1, -1): heat[i] = (heat[i - 1] + heat[i - 2] * 2) // 3
                 if random.randrange(256) < 130:
@@ -260,99 +302,30 @@ def led_thread():
                 for i in range(NUM_LEDS):
                     t = heat[i];
                     ramp = (t & 0x3F) << 2
-                    if t > 0x80:
-                        c = Color(255, 255, ramp)
-                    elif t > 0x40:
-                        c = Color(255, ramp, 0)
-                    else:
-                        c = Color(ramp, 0, 0)
+                    c = Color(255, 255, ramp) if t > 0x80 else Color(255, ramp, 0) if t > 0x40 else Color(ramp, 0, 0)
                     strip.setPixelColor(i, c)
-            elif manual_led == "color_wipe":
-                colors = [Color(255, 0, 0), Color(0, 255, 0), Color(0, 0, 255), Color(255, 100, 0)]
-                ci = (frame // (NUM_LEDS * 4)) % 4
-                pos = (frame // 4) % NUM_LEDS
-                strip.setPixelColor(pos, colors[ci])
-            elif manual_led == "theater_chase":
-                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 20) % 256) if (i + (
-                            frame // 3)) % 3 == 0 else Color(0, 0, 0))
-            elif manual_led == "comet":
-                fade_to_black_by(50)
-                pos = frame % (NUM_LEDS * 2 - 2)
-                pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
-                strip.setPixelColor(pos, hsv((frame * 5) % 256))
-            elif manual_led == "dual_scanner":
-                fade_to_black_by(65)
-                pos = frame % (NUM_LEDS * 2 - 2)
-                pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
-                strip.setPixelColor(pos, Color(255, 20, 0))
-                strip.setPixelColor(NUM_LEDS - 1 - pos, Color(0, 60, 255))
-            elif manual_led == "breathing":
-                lvl = (math.sin(frame * 0.05) + 1) / 2
-                c_val = int(20 + lvl * 100)
-                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, int(c_val * 2.5)))
-            elif manual_led == "sparkle_burst":
-                if frame % 40 == 0:
-                    for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, 0, 0))
-                    for _ in range(random.randint(2, NUM_LEDS)): strip.setPixelColor(random.randint(0, NUM_LEDS - 1),
-                                                                                     hsv(random.randint(0, 255)))
-                else:
-                    fade_to_black_by(30)
-            elif manual_led == "strobe":
-                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 11) % 256, 100, 255) if (
-                                                                                                                  frame // 3) % 2 == 0 else Color(
-                    0, 0, 0))
-            elif manual_led == "wave":
+            elif speed == "MEDIUM":
+                fade_to_black_by(35)
+                pos = beatsin(30, 0, NUM_LEDS - 1)
+                strip.setPixelColor(pos, hsv(int(time.monotonic() * 50) % 256))
+            elif speed == "SLOW":
                 for i in range(NUM_LEDS):
-                    lvl = (math.sin(frame * 0.18 - i * 0.9) + 1) / 2
-                    strip.setPixelColor(i, hsv((frame * 2 + i * 16) % 256, 230, int(25 + lvl * 230)))
-            elif manual_led == "alternating":
-                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 0, 80) if (i + (
-                            frame // 10)) % 2 == 0 else Color(0, 180, 255))
-            elif manual_led == "random_palette":
-                if frame % 100 == 0 or not hasattr(state, 'rand_pal'): state.rand_pal = [hsv(random.randint(0, 255)) for
-                                                                                         _ in range(4)]
-                for i in range(NUM_LEDS): strip.setPixelColor(i, state.rand_pal[i % 4])
+                    lvl = (math.sin(frame * 0.10 - i * 0.5) + 1) / 2
+                    strip.setPixelColor(i, hsv(frame + i * 10, 230, int(25 + lvl * 230)))
+            else:
+                lvl = (math.sin(frame * 0.05) + 1) / 2
+                c_val = int(10 + lvl * 80)
+                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, c_val))
 
             strip.show();
-            time.sleep(0.03);
-            continue
-
-        # --- AUTO MUSIC SYNC (Default) ---
-        if speed == "FAST":
-            for i in range(NUM_LEDS): heat[i] = max(0, heat[i] - random.randrange(10, 35))
-            for i in range(NUM_LEDS - 1, 1, -1): heat[i] = (heat[i - 1] + heat[i - 2] * 2) // 3
-            if random.randrange(256) < 130:
-                s = random.randrange(min(2, NUM_LEDS));
-                heat[s] = min(255, heat[s] + random.randrange(160, 256))
-            for i in range(NUM_LEDS):
-                t = heat[i];
-                ramp = (t & 0x3F) << 2
-                if t > 0x80:
-                    c = Color(255, 255, ramp)
-                elif t > 0x40:
-                    c = Color(255, ramp, 0)
-                else:
-                    c = Color(ramp, 0, 0)
-                strip.setPixelColor(i, c)
-        elif speed == "MEDIUM":
-            fade_to_black_by(35)
-            pos = beatsin(30, 0, NUM_LEDS - 1)
-            strip.setPixelColor(pos, hsv(int(time.monotonic() * 50) % 256))
-        elif speed == "SLOW":
-            for i in range(NUM_LEDS):
-                lvl = (math.sin(frame * 0.10 - i * 0.5) + 1) / 2
-                strip.setPixelColor(i, hsv(frame + i * 10, 230, int(25 + lvl * 230)))
-        else:
-            lvl = (math.sin(frame * 0.05) + 1) / 2
-            c_val = int(10 + lvl * 80)
-            for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, c_val))
-
-        strip.show();
-        time.sleep(0.03)
+            time.sleep(0.03)
+        except Exception as e:
+            print(f"LED Thread Error: {e}")
+            time.sleep(1)
 
 
 # ==========================================
-# 6. LCD DISPLAY ENGINE
+# 5. LCD DISPLAY ENGINE
 # ==========================================
 def init_display():
     spi = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
@@ -373,64 +346,84 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 
 
 def display_loop():
+    os.system("amixer set Master 100% > /dev/null 2>&1")
     disp = init_display()
     width, height = 320, 240
     eye_w, eye_h = 70, 120
     lx, rx, cy = 90, 230, 120
+
     blink_timer = time.time()
+    blink_interval = random.uniform(2.0, 5.0)
     is_blinking = False
 
     while True:
-        with state.lock:
-            speed, beat_active, va, cmd_t, bpm, roll = state.music_speed, state.beat_hit, state.voice_active, state.command_detected_time, state.bpm, state.body_roll
-            state.beat_hit = False
+        try:
+            with state.lock:
+                speed, beat_active, va, cmd_t, bpm, roll = state.music_speed, state.beat_hit, state.voice_active, state.command_detected_time, state.bpm, state.body_roll
+                state.beat_hit = False
 
-        dt = time.time() - cmd_t
-        bg = (255, 255, 255) if dt < 0.25 else (30, 30, 80) if dt < 1.0 else (10, 35, 15) if va else (0, 0, 0)
-        img = Image.new("RGB", (width, height), color=bg)
-        draw = ImageDraw.Draw(img)
+            dt = time.time() - cmd_t
+            bg = (255, 255, 255) if dt < 0.25 else (30, 30, 80) if dt < 1.0 else (10, 35, 15) if va else (0, 0, 0)
+            img = Image.new("RGB", (width, height), color=bg)
+            draw = ImageDraw.Draw(img)
 
-        # Telemetry Text
-        draw.text((5, 5), f"BPM: {bpm:.0f} | Mode: {state.operating_mode}", fill=(100, 100, 100))
+            draw.text((5, 5), f"BPM: {bpm:.0f} | Mode: {state.operating_mode}", fill=(100, 100, 100))
 
-        h, col, cy_r = eye_h, (0, 255, 255), cy
-        if dt < 0.25:
-            col, h, cy_r = (0, 0, 0), int(eye_h * 0.4), cy - 10
-        elif dt < 1.0:
-            col, h, cy_r = (0, 191, 255), int(eye_h * 0.4), cy - 10
-        elif va:
-            col, h = (0, 255, 100), int(eye_h * 0.75)
-        elif speed == "FAST":
-            col, h = (255, 50, 50), eye_h + 20
-        elif speed == "MEDIUM":
-            col, h = (255, 150, 50), eye_h + 10
-        elif speed == "SLOW":
-            col, h = (150, 50, 255), int(eye_h * 0.6)
+            h, col, cy_r = eye_h, (0, 255, 255), cy
+            if dt < 0.25:
+                col, h, cy_r = (0, 0, 0), int(eye_h * 0.4), cy - 10
+            elif dt < 1.0:
+                col, h, cy_r = (0, 191, 255), int(eye_h * 0.4), cy - 10
+            elif va:
+                col, h = (0, 255, 100), int(eye_h * 0.75)
+            elif speed == "FAST":
+                col, h = (255, 50, 50), eye_h + 20
+            elif speed == "MEDIUM":
+                col, h = (255, 150, 50), eye_h + 10
+            elif speed == "SLOW":
+                col, h = (150, 50, 255), int(eye_h * 0.6)
 
-        ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
+            ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
 
-        if time.time() - blink_timer > np.random.uniform(2.0, 5.0):
-            is_blinking = True;
-            blink_timer = time.time()
-        if is_blinking and not va and dt > 1.0:
-            h = 10
-            if time.time() - blink_timer > 0.15: is_blinking = False
+            if time.time() - blink_timer > blink_interval:
+                is_blinking = True
+                blink_timer = time.time()
+                blink_interval = random.uniform(2.0, 5.0)
 
-        roll_offset = int(roll * 1.5)
-        cy_left, cy_right = cy_r + roll_offset, cy_r - roll_offset
+            if is_blinking and not va and dt > 1.0:
+                h = 10
+                if time.time() - blink_timer > 0.15: is_blinking = False
 
-        draw_rounded_rect(draw, [lx - ew // 2, cy_left - h // 2, lx + ew // 2, cy_left + h // 2], corner_radius=20,
-                          fill=col)
-        draw_rounded_rect(draw, [rx - ew // 2, cy_right - h // 2, rx + ew // 2, cy_right + h // 2], corner_radius=20,
-                          fill=col)
+            roll_offset = int(roll * 1.5)
+            cy_left, cy_right = cy_r + roll_offset, cy_r - roll_offset
 
-        disp.image(img)
-        time.sleep(0.03)
+            draw_rounded_rect(draw, [lx - ew // 2, cy_left - h // 2, lx + ew // 2, cy_left + h // 2], corner_radius=20,
+                              fill=col)
+            draw_rounded_rect(draw, [rx - ew // 2, cy_right - h // 2, rx + ew // 2, cy_right + h // 2],
+                              corner_radius=20, fill=col)
+
+            disp.image(img)
+            time.sleep(0.03)
+        except Exception as e:
+            print(f"Display Thread Error: {e}")
+            traceback.print_exc()
+            time.sleep(1)
 
 
 # ==========================================
-# 7. AUDIO AI & VAD ENGINE
+# 6. AUDIO AI & VAD ENGINE
 # ==========================================
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    b, a = butter(order, [lowcut / (0.5 * fs), highcut / (0.5 * fs)], btype='band')
+    return b, a
+
+
+_BP_B, _BP_A = butter_bandpass(300, 3400, RATE, order=4)
+
+
+def bandpass(data): return np.ascontiguousarray(lfilter(_BP_B, _BP_A, data), dtype=np.float32)
+
+
 yamnet_model = None
 YAMNET_CLASSES = []
 
@@ -447,13 +440,16 @@ def run_yamnet_periodically():
         print(f"\n❌ [AI] Failed to load YAMNet: {e}")
 
     while True:
-        time.sleep(4)
-        if yamnet_model is None: continue
-        snap = np.copy(audio_buffer)
-        scores, _, _ = yamnet_model(snap)
-        top = int(np.argmax(np.mean(scores, axis=0)))
-        with state.lock:
-            if "CMD" not in state.genre: state.genre = YAMNET_CLASSES[top]
+        try:
+            time.sleep(4)
+            if yamnet_model is None: continue
+            snap = np.copy(audio_buffer)
+            scores, _, _ = yamnet_model(snap)
+            top = int(np.argmax(np.mean(scores, axis=0)))
+            with state.lock:
+                if "CMD" not in state.genre: state.genre = YAMNET_CLASSES[top]
+        except Exception as e:
+            time.sleep(1)
 
 
 audio_buffer = np.zeros(RATE * 3, dtype=np.float32)
@@ -520,61 +516,63 @@ def audio_listener():
 
     with mic.recorder(samplerate=RATE, channels=1) as recorder:
         while True:
-            chunk = recorder.record(numframes=CHUNK).flatten().astype(np.float32)
-            now = time.time()
-            audio_buffer = np.roll(audio_buffer, -CHUNK)
-            audio_buffer[-CHUNK:] = chunk
+            try:
+                chunk = recorder.record(numframes=CHUNK).flatten().astype(np.float32)
+                now = time.time()
+                audio_buffer = np.roll(audio_buffer, -CHUNK)
+                audio_buffer[-CHUNK:] = chunk
 
-            if aubio_syllable(butter_bandpass_filter(chunk))[0]: syllables.append(now)
-            syllables = [t for t in syllables if now - t <= 3.0]
+                if aubio_syllable(butter_bandpass_filter(chunk))[0]: syllables.append(now)
+                syllables = [t for t in syllables if now - t <= 3.0]
 
-            with state.lock:
-                va = state.voice_active
-                override = now < state.voice_override_until
-
-            if len(syllables) > 8 and not va and not override:
-                with state.lock: state.voice_active = True
-                audio_bytes = (np.concatenate([audio_buffer[-RATE * 4:]]) * 32767).astype(np.int16).tobytes()
-                threading.Thread(target=process_voice_command, args=(audio_bytes,), daemon=True).start()
-                syllables.clear()
-
-            if aubio_tempo(chunk)[0] and (now - beat_debounce > 0.2):
-                bpm = aubio_tempo.get_bpm()
-                if 40 < bpm < 90: bpm *= 2
-                if 50 < bpm < 200:
-                    with state.lock: state.bpm_history.append(bpm)
                 with state.lock:
-                    state.beat_hit = True
-                    if len(state.bpm_history) > 0: state.bpm = np.median(list(state.bpm_history))
-                beat_debounce = now
+                    va = state.voice_active
+                    override = now < state.voice_override_until
 
-            if state.operating_mode == "AUTO":
-                with state.lock:
-                    if (now - state.last_dance_command_time) >= 3.0 and not override and not va and len(
-                            state.bpm_history) >= 3:
-                        avg_bpm = np.median(list(state.bpm_history))
-                        if any(s in state.genre for s in ["Acoustic", "Vocal", "Speech"]) or avg_bpm < 100:
-                            state.music_speed, move = "SLOW", random.choice(
-                                ["DANCE_ROLL_SLOW", "DANCE_CRAWL", "DANCE_BELLY_CRAWL", "DANCE_HEADBANG",
-                                 "DANCE_PEACOCK", "DANCE_WAVE", "DANCE_BEG_WAVE", "DANCE_CHASSIS_BREATHE"])
-                        elif avg_bpm < 130:
-                            state.music_speed, move = "MEDIUM", random.choice(
-                                ["DANCE_TWIST", "DANCE_TWIST_2", "DANCE_SALSA", "DANCE_RIPPLE", "DANCE_RIPPLE_2",
-                                 "DANCE_PITCH_PIVOT", "DANCE_CIRCLE", "DANCE_CIRCLE_2"])
-                        else:
-                            state.music_speed, move = "FAST", random.choice(
-                                ["DANCE_ROLL_FAST", "DANCE_STROBE", "DANCE_PULSE", "DANCE_TWITCH", "DANCE_WORM",
-                                 "DANCE_GALLOP"])
+                if len(syllables) > 8 and not va and not override:
+                    with state.lock: state.voice_active = True
+                    audio_bytes = (np.concatenate([audio_buffer[-RATE * 4:]]) * 32767).astype(np.int16).tobytes()
+                    threading.Thread(target=process_voice_command, args=(audio_bytes,), daemon=True).start()
+                    syllables.clear()
 
-                        send_to_esp32(move)
-                        state.last_dance_command_time = now
-                        state.bpm_history.clear()
+                if aubio_tempo(chunk)[0] and (now - beat_debounce > 0.2):
+                    bpm = aubio_tempo.get_bpm()
+                    if 40 < bpm < 90: bpm *= 2
+                    if 50 < bpm < 200:
+                        with state.lock: state.bpm_history.append(bpm)
+                    with state.lock:
+                        state.beat_hit = True
+                        if len(state.bpm_history) > 0: state.bpm = np.median(list(state.bpm_history))
+                    beat_debounce = now
+
+                if state.operating_mode == "AUTO":
+                    with state.lock:
+                        if (now - state.last_dance_command_time) >= 3.0 and not override and not va and len(
+                                state.bpm_history) >= 3:
+                            avg_bpm = np.median(list(state.bpm_history))
+                            if any(s in state.genre for s in ["Acoustic", "Vocal", "Speech"]) or avg_bpm < 100:
+                                state.music_speed, move = "SLOW", random.choice(
+                                    ["DANCE_ROLL_SLOW", "DANCE_CRAWL", "DANCE_BELLY_CRAWL", "DANCE_HEADBANG",
+                                     "DANCE_PEACOCK", "DANCE_WAVE", "DANCE_BEG_WAVE", "DANCE_CHASSIS_BREATHE"])
+                            elif avg_bpm < 130:
+                                state.music_speed, move = "MEDIUM", random.choice(
+                                    ["DANCE_TWIST", "DANCE_TWIST_2", "DANCE_SALSA", "DANCE_RIPPLE", "DANCE_RIPPLE_2",
+                                     "DANCE_PITCH_PIVOT", "DANCE_CIRCLE", "DANCE_CIRCLE_2"])
+                            else:
+                                state.music_speed, move = "FAST", random.choice(
+                                    ["DANCE_ROLL_FAST", "DANCE_STROBE", "DANCE_PULSE", "DANCE_TWITCH", "DANCE_WORM",
+                                     "DANCE_GALLOP"])
+
+                            send_to_esp32(move)
+                            state.last_dance_command_time = now
+                            state.bpm_history.clear()
+            except Exception as e:
+                time.sleep(0.1)
 
 
 # ==========================================
-# 8. GOD-MODE CLI MENU
+# 7. GOD-MODE CLI MENU
 # ==========================================
-# Combines all 24 dances, 6 movements, 6 test legs, and 16 LED patterns.
 CLI_COMMANDS = {
     # --- Movements ---
     11: ("WALK_FORWARD", "Walk Fwd"), 12: ("WALK_BACKWARD", "Walk Back"), 13: ("TURN_LEFT", "Turn L"),
@@ -673,7 +671,7 @@ def manual_testing_loop():
 
 
 # ==========================================
-# 9. MASTER BOOT
+# 8. MASTER BOOT
 # ==========================================
 if __name__ == "__main__":
     print("\n" + "=" * 50 + "\n      🤖 CODEGENIX HEXABOT OS 🤖\n" + "=" * 50)
