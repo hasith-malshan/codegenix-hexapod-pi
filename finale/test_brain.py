@@ -110,6 +110,8 @@ class RobotState:
         self.command_detected_time = 0.0
         self.body_roll = 0.0
 
+        self.manual_led_pattern = None  # Tracks CLI LED overrides
+
         self.last_dance_command_time = time.time()
         self.voice_override_until = 0.0
         self.bpm_history = collections.deque(maxlen=20)
@@ -204,10 +206,12 @@ def led_thread():
     heat = [0] * NUM_LEDS
     while True:
         with state.lock:
-            speed, va, cmd_t = state.music_speed, state.voice_active, state.command_detected_time
+            speed, va, cmd_t, manual_led = state.music_speed, state.voice_active, state.command_detected_time, state.manual_led_pattern
+
         dt = time.time() - cmd_t
         frame += 1
 
+        # SUCCESS FLASHES (Top Priority, ignores overrides)
         if dt < 0.25:
             for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 255, 255))
             strip.show();
@@ -219,6 +223,7 @@ def led_thread():
             time.sleep(0.02);
             continue
 
+        # LISTENING MODE (Ignores overrides)
         if va:
             strip.setPixelColor(0, Color(0, 0, 0))
             fade_to_black_by(60)
@@ -229,14 +234,98 @@ def led_thread():
             time.sleep(0.05);
             continue
 
+        # --- CLI MANUAL LED OVERRIDES (All 16 Patterns) ---
+        if manual_led:
+            if manual_led == "rainbow":
+                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 18) % 256))
+            elif manual_led == "confetti":
+                fade_to_black_by(25)
+                if random.random() < 0.3: strip.setPixelColor(random.randint(0, NUM_LEDS - 1),
+                                                              hsv(random.randint(0, 255)))
+            elif manual_led == "sinelon":
+                fade_to_black_by(35)
+                strip.setPixelColor(beatsin(18, 0, NUM_LEDS - 1), hsv((frame * 8) % 256))
+            elif manual_led == "bpm":
+                beat = beatsin(90, 80, 255)
+                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((i * 24 + frame * 3) % 256, 255, beat))
+            elif manual_led == "juggle":
+                fade_to_black_by(40)
+                for d in range(4): strip.setPixelColor(beatsin(d + 8, 0, NUM_LEDS - 1, d * 0.6), hsv(d * 64))
+            elif manual_led == "fire":
+                for i in range(NUM_LEDS): heat[i] = max(0, heat[i] - random.randrange(10, 35))
+                for i in range(NUM_LEDS - 1, 1, -1): heat[i] = (heat[i - 1] + heat[i - 2] * 2) // 3
+                if random.randrange(256) < 130:
+                    s = random.randrange(min(2, NUM_LEDS));
+                    heat[s] = min(255, heat[s] + random.randrange(160, 256))
+                for i in range(NUM_LEDS):
+                    t = heat[i];
+                    ramp = (t & 0x3F) << 2
+                    if t > 0x80:
+                        c = Color(255, 255, ramp)
+                    elif t > 0x40:
+                        c = Color(255, ramp, 0)
+                    else:
+                        c = Color(ramp, 0, 0)
+                    strip.setPixelColor(i, c)
+            elif manual_led == "color_wipe":
+                colors = [Color(255, 0, 0), Color(0, 255, 0), Color(0, 0, 255), Color(255, 100, 0)]
+                ci = (frame // (NUM_LEDS * 4)) % 4
+                pos = (frame // 4) % NUM_LEDS
+                strip.setPixelColor(pos, colors[ci])
+            elif manual_led == "theater_chase":
+                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 20) % 256) if (i + (
+                            frame // 3)) % 3 == 0 else Color(0, 0, 0))
+            elif manual_led == "comet":
+                fade_to_black_by(50)
+                pos = frame % (NUM_LEDS * 2 - 2)
+                pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
+                strip.setPixelColor(pos, hsv((frame * 5) % 256))
+            elif manual_led == "dual_scanner":
+                fade_to_black_by(65)
+                pos = frame % (NUM_LEDS * 2 - 2)
+                pos = NUM_LEDS * 2 - 2 - pos if pos >= NUM_LEDS else pos
+                strip.setPixelColor(pos, Color(255, 20, 0))
+                strip.setPixelColor(NUM_LEDS - 1 - pos, Color(0, 60, 255))
+            elif manual_led == "breathing":
+                lvl = (math.sin(frame * 0.05) + 1) / 2
+                c_val = int(20 + lvl * 100)
+                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, int(c_val * 2.5)))
+            elif manual_led == "sparkle_burst":
+                if frame % 40 == 0:
+                    for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, 0, 0))
+                    for _ in range(random.randint(2, NUM_LEDS)): strip.setPixelColor(random.randint(0, NUM_LEDS - 1),
+                                                                                     hsv(random.randint(0, 255)))
+                else:
+                    fade_to_black_by(30)
+            elif manual_led == "strobe":
+                for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 11) % 256, 100, 255) if (
+                                                                                                                  frame // 3) % 2 == 0 else Color(
+                    0, 0, 0))
+            elif manual_led == "wave":
+                for i in range(NUM_LEDS):
+                    lvl = (math.sin(frame * 0.18 - i * 0.9) + 1) / 2
+                    strip.setPixelColor(i, hsv((frame * 2 + i * 16) % 256, 230, int(25 + lvl * 230)))
+            elif manual_led == "alternating":
+                for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 0, 80) if (i + (
+                            frame // 10)) % 2 == 0 else Color(0, 180, 255))
+            elif manual_led == "random_palette":
+                if frame % 100 == 0 or not hasattr(state, 'rand_pal'): state.rand_pal = [hsv(random.randint(0, 255)) for
+                                                                                         _ in range(4)]
+                for i in range(NUM_LEDS): strip.setPixelColor(i, state.rand_pal[i % 4])
+
+            strip.show();
+            time.sleep(0.03);
+            continue
+
+        # --- AUTO MUSIC SYNC (Default) ---
         if speed == "FAST":
             for i in range(NUM_LEDS): heat[i] = max(0, heat[i] - random.randrange(10, 35))
             for i in range(NUM_LEDS - 1, 1, -1): heat[i] = (heat[i - 1] + heat[i - 2] * 2) // 3
             if random.randrange(256) < 130:
-                s = random.randrange(min(2, NUM_LEDS))
+                s = random.randrange(min(2, NUM_LEDS));
                 heat[s] = min(255, heat[s] + random.randrange(160, 256))
             for i in range(NUM_LEDS):
-                t = heat[i]
+                t = heat[i];
                 ramp = (t & 0x3F) << 2
                 if t > 0x80:
                     c = Color(255, 255, ramp)
@@ -245,29 +334,21 @@ def led_thread():
                 else:
                     c = Color(ramp, 0, 0)
                 strip.setPixelColor(i, c)
-            strip.show();
-            time.sleep(0.03)
-
         elif speed == "MEDIUM":
             fade_to_black_by(35)
             pos = beatsin(30, 0, NUM_LEDS - 1)
             strip.setPixelColor(pos, hsv(int(time.monotonic() * 50) % 256))
-            strip.show();
-            time.sleep(0.02)
-
         elif speed == "SLOW":
             for i in range(NUM_LEDS):
                 lvl = (math.sin(frame * 0.10 - i * 0.5) + 1) / 2
                 strip.setPixelColor(i, hsv(frame + i * 10, 230, int(25 + lvl * 230)))
-            strip.show();
-            time.sleep(0.04)
-
         else:
             lvl = (math.sin(frame * 0.05) + 1) / 2
             c_val = int(10 + lvl * 80)
             for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, c_val))
-            strip.show();
-            time.sleep(0.03)
+
+        strip.show();
+        time.sleep(0.03)
 
 
 # ==========================================
@@ -327,6 +408,7 @@ def display_loop():
             col, h = (150, 50, 255), int(eye_h * 0.6)
 
         ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
+
         if time.time() - blink_timer > np.random.uniform(2.0, 5.0):
             is_blinking = True;
             blink_timer = time.time()
@@ -398,17 +480,13 @@ def process_voice_command(audio_bytes):
 
         if state.operating_mode == "AUTO":
             if "stop" in text or "stand" in text:
-                send_to_esp32("STAND");
-                say_phrase_offline("stopping")
+                send_to_esp32("STAND"); say_phrase_offline("stopping")
             elif "forward" in text:
-                send_to_esp32("WALK_FORWARD");
-                say_phrase_offline("walking forward")
+                send_to_esp32("WALK_FORWARD"); say_phrase_offline("walking forward")
             elif "back" in text:
-                send_to_esp32("WALK_BACKWARD");
-                say_phrase_offline("walking backward")
+                send_to_esp32("WALK_BACKWARD"); say_phrase_offline("walking backward")
             elif "dance" in text:
-                send_to_esp32("DANCE_CIRCLE");
-                say_phrase_offline("party mode")
+                send_to_esp32("DANCE_CIRCLE"); say_phrase_offline("party mode")
             else:
                 with state.lock:
                     state.voice_active = False
@@ -494,55 +572,102 @@ def audio_listener():
 
 
 # ==========================================
-# 8. CLI MANUAL MENU
+# 8. GOD-MODE CLI MENU
 # ==========================================
-MANUAL_COMMANDS = {
-    11: ("WALK_FORWARD", "Walk Forward"), 12: ("WALK_BACKWARD", "Walk Backward"), 13: ("TURN_LEFT", "Turn Left"),
-    14: ("TURN_RIGHT", "Turn Right"), 15: ("STAND", "Stand / Stop"),
-    21: ("DANCE_WAVE", "Wave"), 22: ("DANCE_RIPPLE", "Ripple"), 23: ("DANCE_PEACOCK", "Peacock"),
-    24: ("DANCE_SALSA", "Salsa"),
-    25: ("DANCE_TWIST", "Twist"), 26: ("DANCE_CIRCLE", "Circle"), 27: ("DANCE_CRAWL", "Crawl"),
-    28: ("DANCE_HEADBANG", "Headbang"),
-    29: ("DANCE_ROLL_FAST", "Fast Roll"), 30: ("DANCE_STROBE", "Strobe"), 31: ("DANCE_PULSE", "Pulse"),
-    32: ("DANCE_GALLOP", "Gallop"),
-    33: ("DANCE_BEG_WAVE", "Beg Wave"), 34: ("DANCE_CHASSIS_BREATHE", "Breathe"),
-    35: ("DANCE_BELLY_CRAWL", "Belly Crawl"),
-    36: ("DANCE_PITCH_PIVOT", "Pitch Pivot"), 37: ("DANCE_TWITCH", "Twitch"), 38: ("DANCE_WORM", "Worm"),
-    41: ("RELAX", "SAFETY: Deactivate (Relax) All Servos")
+# Combines all 24 dances, 6 movements, 6 test legs, and 16 LED patterns.
+CLI_COMMANDS = {
+    # --- Movements ---
+    11: ("WALK_FORWARD", "Walk Fwd"), 12: ("WALK_BACKWARD", "Walk Back"), 13: ("TURN_LEFT", "Turn L"),
+    14: ("TURN_RIGHT", "Turn R"), 15: ("STAND", "STAND/Stop"), 16: ("RELAX", "Deactivate"),
+    # --- Dances (21-44) ---
+    21: ("DANCE_WAVE", "Wave"), 22: ("DANCE_RIPPLE", "Ripple"), 23: ("DANCE_RIPPLE_2", "Ripple 2"),
+    24: ("DANCE_PEACOCK", "Peacock"),
+    25: ("DANCE_SALSA", "Salsa"), 26: ("DANCE_TWIST", "Twist"), 27: ("DANCE_TWIST_2", "Twist 2"),
+    28: ("DANCE_ROLL", "Roll"),
+    29: ("DANCE_ROLL_2", "Roll 2"), 30: ("DANCE_ROLL_FAST", "Fast Roll"), 31: ("DANCE_ROLL_SLOW", "Slow Roll"),
+    32: ("DANCE_CIRCLE", "Circle"),
+    33: ("DANCE_CIRCLE_2", "Circle 2"), 34: ("DANCE_CRAWL", "Crawl"), 35: ("DANCE_HEADBANG", "Headbang"),
+    36: ("DANCE_STROBE", "Strobe"),
+    37: ("DANCE_PULSE", "Pulse"), 38: ("DANCE_GALLOP", "Gallop"), 39: ("DANCE_BEG_WAVE", "Beg Wave"),
+    40: ("DANCE_CHASSIS_BREATHE", "Breathe"),
+    41: ("DANCE_BELLY_CRAWL", "Belly Crawl"), 42: ("DANCE_PITCH_PIVOT", "Pitch Pivot"), 43: ("DANCE_TWITCH", "Twitch"),
+    44: ("DANCE_WORM", "Worm"),
+    # --- Test Legs (70-75) ---
+    70: ("TEST_LEG_0", "Test Leg 0"), 71: ("TEST_LEG_1", "Test Leg 1"), 72: ("TEST_LEG_2", "Test Leg 2"),
+    73: ("TEST_LEG_3", "Test Leg 3"), 74: ("TEST_LEG_4", "Test Leg 4"), 75: ("TEST_LEG_5", "Test Leg 5"),
+}
+
+LED_PATTERNS = {
+    51: "rainbow", 52: "confetti", 53: "sinelon", 54: "bpm",
+    55: "juggle", 56: "fire", 57: "color_wipe", 58: "theater_chase",
+    59: "comet", 60: "dual_scanner", 61: "breathing", 62: "sparkle_burst",
+    63: "strobe", 64: "wave", 65: "alternating", 66: "random_palette"
 }
 
 
-def manual_testing_loop():
-    print("\n" + "=" * 50 + "\n   🤖 HEXAPOD GOD-MODE CLI (MANUAL TESTING) 🤖\n" + "=" * 50)
-    for k, v in MANUAL_COMMANDS.items(): print(f"  [{k:02d}] {v[1]}")
-    print("\n --- LED & SCREEN MOODS ---")
-    print("  [91] Idle (Cyan)  [92] Party (Rainbow/Fire)")
-    print("  [93] Slow (Purple Wave) [94] Success Flash")
-    print("\n  [ 0] EXIT PROGRAM\n" + "=" * 50)
+def print_menu():
+    print("\n" + "=" * 70)
+    print("           🤖 HEXAPOD GOD-MODE CLI 🤖")
+    print("=" * 70)
+    print(" --- MOVEMENTS (11-16) ---")
+    print("  [11] Walk Fwd      [12] Walk Back     [13] Turn L")
+    print("  [14] Turn Right    [15] STAND (Stop)  [16] RELAX (Safety)")
 
+    print("\n --- DANCES (21-44) ---")
+    print("  [21] Wave          [22] Ripple        [23] Ripple 2")
+    print("  [24] Peacock       [25] Salsa         [26] Twist")
+    print("  [27] Twist 2       [28] Roll          [29] Roll 2")
+    print("  [30] Fast Roll     [31] Slow Roll     [32] Circle")
+    print("  [33] Circle 2      [34] Crawl         [35] Headbang")
+    print("  [36] Strobe        [37] Pulse         [38] Gallop")
+    print("  [39] Beg Wave      [40] Breathe       [41] Belly Crawl")
+    print("  [42] Pitch Pivot   [43] Twitch        [44] Worm")
+
+    print("\n --- 16 LED PATTERN OVERRIDES (51-66) ---")
+    print("  [51] Rainbow       [52] Confetti      [53] Sinelon")
+    print("  [54] BPM           [55] Juggle        [56] Fire")
+    print("  [57] Color Wipe    [58] Theater Chase [59] Comet")
+    print("  [60] Dual Scanner  [61] Breathing     [62] Sparkle Burst")
+    print("  [63] Strobe        [64] Wave          [65] Alternating")
+    print("  [66] Random Palette")
+    print("  [69] RETURN LEDS TO AUTO (Music Sync)")
+
+    print("\n --- DIAGNOSTICS & SYSTEM ---")
+    print("  [70] to [75] Test Individual Legs 0 through 5")
+    print("  [91] Toggle Audio Logs      [ 0] EXIT PROGRAM")
+    print("=" * 70)
+
+
+def manual_testing_loop():
+    print_menu()
     while True:
         try:
-            choice = input("\nEnter command number >>> ").strip()
+            choice = input("\nEnter command number (or 'm' for menu) >>> ").strip()
             if choice == '0' or choice.lower() == 'q': os._exit(0)
-            if choice.isdigit() and int(choice) in MANUAL_COMMANDS:
-                cmd_str = MANUAL_COMMANDS[int(choice)][0]
-                send_to_esp32(cmd_str)
-                with state.lock:
-                    state.command_detected_time = time.time()
-            elif choice == '91':
-                with state.lock:
-                    state.music_speed, state.voice_active = "IDLE", False
-            elif choice == '92':
-                with state.lock:
-                    state.music_speed, state.voice_active = "FAST", False
-            elif choice == '93':
-                with state.lock:
-                    state.music_speed, state.voice_active = "SLOW", False
-            elif choice == '94':
-                with state.lock:
-                    state.voice_active, state.command_detected_time = False, time.time()
+            if choice.lower() == 'm': print_menu(); continue
+
+            if choice.isdigit():
+                c = int(choice)
+                if c in CLI_COMMANDS:
+                    cmd_str = CLI_COMMANDS[c][0]
+                    send_to_esp32(cmd_str)
+                    with state.lock:
+                        state.command_detected_time = time.time()
+                elif c in LED_PATTERNS:
+                    with state.lock:
+                        state.manual_led_pattern = LED_PATTERNS[c]
+                    print(f"✨ LED Pattern Overridden to: {LED_PATTERNS[c]}")
+                elif c == 69:
+                    with state.lock:
+                        state.manual_led_pattern = None
+                    print("🎵 LEDs returned to AUTO MUSIC SYNC mode.")
+                elif c == 91:
+                    state.show_audio_logs = not state.show_audio_logs
+                    print(f"📡 Audio Logs turned {'ON' if state.show_audio_logs else 'OFF'}")
+                else:
+                    print("Invalid command.")
             else:
-                print("Invalid command.")
+                print("Invalid input. Type 'm' for menu.")
         except KeyboardInterrupt:
             os._exit(0)
 
