@@ -1,4 +1,5 @@
 import sys
+import collections  # <-- ADD THIS LINE HERE!
 
 # Ensure sudo can find your packages
 sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
