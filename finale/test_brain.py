@@ -164,15 +164,15 @@ def esp32_reader_thread():
 
 def send_to_esp32(command):
     if not (esp32_serial and esp32_serial.is_open):
-        print(f" [Simulated] -> {command}")
+        print(f" ⚠️ [Simulated] -> {command}")
         return
-    with _send_lock:
-        if not _esp32_ready.wait(timeout=2.0): pass
-        _esp32_ready.clear()
-        try:
-            esp32_serial.write((command + "\n").encode('utf-8'))
-        except Exception:
-            _esp32_ready.set()
+    # We removed the restrictive _send_lock and wait() timeout!
+    try:
+        esp32_serial.write((command + "\n").encode('utf-8'))
+        # Optional: uncomment the line below if you want to see every command sent in the console
+        # print(f"📡 [USB] Sent: {command}")
+    except Exception as e:
+        print(f"❌ Serial write error: {e}")
 
 
 # ==========================================
