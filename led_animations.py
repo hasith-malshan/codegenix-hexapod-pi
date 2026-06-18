@@ -5,23 +5,47 @@ import math
 import random
 import time
 
-import board
-import neopixel
+from rpi_ws281x import Color, PixelStrip, ws
 
 print("Modules loaded. Configuring NeoPixel strip...", flush=True)
 
-LED_PIN = board.D13
+LED_PIN = 13
 NUM_LEDS = 7
-BRIGHTNESS = 100 / 255
-COLOR_ORDER = neopixel.GRB
+BRIGHTNESS = 100
+LED_CHANNEL = 1
 
-pixels = neopixel.NeoPixel(
-    LED_PIN,
-    NUM_LEDS,
-    brightness=BRIGHTNESS,
-    auto_write=False,
-    pixel_order=COLOR_ORDER,
-)
+
+class NeoPixelStrip:
+    def __init__(self):
+        self._strip = PixelStrip(
+            NUM_LEDS,
+            LED_PIN,
+            freq_hz=800000,
+            dma=10,
+            invert=False,
+            brightness=BRIGHTNESS,
+            channel=LED_CHANNEL,
+            strip_type=ws.WS2811_STRIP_GRB,
+        )
+        self._strip.begin()
+
+    def __getitem__(self, index):
+        color = self._strip.getPixelColor(index)
+        return (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF
+
+    def __setitem__(self, index, color):
+        red, green, blue = color
+        self._strip.setPixelColor(index, Color(red, green, blue))
+
+    def fill(self, color):
+        for index in range(NUM_LEDS):
+            self[index] = color
+
+    def show(self):
+        self._strip.show()
+
+
+pixels = NeoPixelStrip()
 
 print("NeoPixel strip configured. Starting animations...", flush=True)
 
@@ -243,7 +267,7 @@ def clear_strip():
 def main():
     log_animation(
         "Startup",
-        f"pin=GPIO18, leds={NUM_LEDS}, brightness={BRIGHTNESS:.2f}, order=GRB",
+        f"pin=GPIO13, channel={LED_CHANNEL}, leds={NUM_LEDS}, brightness={BRIGHTNESS}, order=GRB",
     )
     try:
         while True:
