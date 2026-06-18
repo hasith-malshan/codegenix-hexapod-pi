@@ -1,7 +1,27 @@
 import sys
+# --- ADD THIS LINE TO FIX THE SUDO PATH ISSUE ---
+sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
+
 import importlib.util
 import os
-os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"  
+os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
+
+# --- The "Smart" Python 3.13 Hack ---
+class FakeImp:
+    @staticmethod
+    def find_module(name):
+        if importlib.util.find_spec(name) is None:
+            raise ImportError(f"No module named {name}")
+        return None
+sys.modules['imp'] = FakeImp()
+# ------------------------------------
+
+import serial
+import soundcard as sc
+
+import importlib.util
+import os
+os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
 import random
 import collections
 import threading
