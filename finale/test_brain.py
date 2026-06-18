@@ -5,14 +5,21 @@ sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
 import importlib.util
 import os
 
-# --- FIX: ALLOW ROOT TO USE NORMAL USER'S AUDIO ---
-# 1. Ask the 'codegenix' user's audio server to open a public socket
-os.system("sudo -u codegenix pactl load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-socket > /dev/null 2>&1")
+# --- REVISED FIX: ALLOW ROOT TO USE NORMAL USER'S AUDIO ---
+# 1. Check if the socket already exists. If not, explicitly point pactl to user 1000's server
+if not os.path.exists("/tmp/pulse-socket"):
+    os.system("sudo -u codegenix pactl --server=unix:/run/user/1000/pulse/native load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-socket > /dev/null 2>&1")
+
 # 2. Tell this Root script to route audio through that public socket
 os.environ["PULSE_SERVER"] = "unix:/tmp/pulse-socket"
+
 # 3. Strip the restrictive user runtime directory variable to prevent crashes
 os.environ.pop("XDG_RUNTIME_DIR", None)
-# --------------------------------------------------
+
+# 4. (Optional) Quick diagnostic check to ensure the socket was successfully created
+if not os.path.exists("/tmp/pulse-socket"):
+    print("⚠️ WARNING: Could not establish a bridge socket to PulseAudio at /tmp/pulse-socket.")
+# ----------------------------------------------------------
 
 os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
 
@@ -31,6 +38,9 @@ import soundcard as sc
 import numpy as np
 import aubio
 import tensorflow as tf
+
+# ... (the rest of your code continues normally below this) ...
+
 import tensorflow_hub as hub
 import speech_recognition as sr
 import pyttsx3
