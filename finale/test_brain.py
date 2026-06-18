@@ -1,14 +1,20 @@
 import sys
+# Ensure sudo can find your packages
+sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
+
 import importlib.util
 import os
-import random
-import collections
-import threading
-import time
-import csv
-import math
-import colorsys
 
+# --- FIX: ALLOW ROOT TO USE NORMAL USER'S AUDIO ---
+# 1. Ask the 'codegenix' user's audio server to open a public socket
+os.system("sudo -u codegenix pactl load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-socket > /dev/null 2>&1")
+# 2. Tell this Root script to route audio through that public socket
+os.environ["PULSE_SERVER"] = "unix:/tmp/pulse-socket"
+# 3. Strip the restrictive user runtime directory variable to prevent crashes
+os.environ.pop("XDG_RUNTIME_DIR", None)
+# --------------------------------------------------
+
+os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
 
 # --- The "Smart" Python 3.13 Hack ---
 class FakeImp:
@@ -17,8 +23,6 @@ class FakeImp:
         if importlib.util.find_spec(name) is None:
             raise ImportError(f"No module named {name}")
         return None
-
-
 sys.modules['imp'] = FakeImp()
 # ------------------------------------
 
