@@ -1,5 +1,5 @@
 import sys
-import collections  # <-- ADD THIS LINE HERE!
+import collections  # Required for BPM tracking history
 
 # Ensure sudo can find your packages
 sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
@@ -53,6 +53,8 @@ import csv
 import colorsys
 import speech_recognition as sr
 import pyttsx3
+import math    # FIXED: Added missing import
+import random  # FIXED: Added missing import
 from scipy.signal import butter, lfilter
 
 # Display & Graphics Libraries
@@ -69,7 +71,7 @@ from rpi_ws281x import PixelStrip, Color, ws
 # 1. AUDIO CONFIGURATION
 # ==========================================
 RATE = 16000
-CHUNK = 256
+CHUNK = 256  # 16ms of audio for high-resolution tracking
 
 
 # ==========================================
@@ -96,6 +98,12 @@ DISPLAY_CS_PIN = board.CE0  # GPIO8
 DISPLAY_DC_PIN = board.D24  # GPIO24
 DISPLAY_RST_PIN = board.D25  # GPIO25
 
+# --- WS2812B LED CONFIGURATION (FIXED: Added missing variables) ---
+LED_PIN = 13          # GPIO13
+LED_CHANNEL = 1       # PWM Channel 1 for GPIO13
+NUM_LEDS = 7          # Adjust based on your strip length
+LED_BRIGHTNESS = 100  # Max is 255
+
 
 # ==========================================
 # 4. GLOBAL STATE (Shared between AI & Display)
@@ -112,7 +120,8 @@ class RobotState:
         self.music_speed = "IDLE"  # IDLE, SLOW, FAST, DANCE
         self.voice_active = False
         self.command_detected_time = 0.0
-        self.body_roll = 0.0
+
+        self.body_roll = 0.0  # IMU Tilt from ESP32
 
         # Beat tracking history
         self.bpm_history = collections.deque(maxlen=20)
