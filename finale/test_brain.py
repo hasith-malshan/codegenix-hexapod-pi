@@ -1,6 +1,7 @@
 import sys
 import importlib.util
 import os
+os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"  
 import random
 import collections
 import threading
