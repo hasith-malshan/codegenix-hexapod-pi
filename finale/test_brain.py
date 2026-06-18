@@ -1,27 +1,32 @@
 import sys
+
 # Ensure sudo can find your packages
 sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
 
 import importlib.util
 import os
 
-# --- REVISED FIX: ALLOW ROOT TO USE NORMAL USER'S AUDIO ---
-# 1. Check if the socket already exists. If not, explicitly point pactl to user 1000's server
-if not os.path.exists("/tmp/pulse-socket"):
-    os.system("sudo -u codegenix pactl --server=unix:/run/user/1000/pulse/native load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-socket > /dev/null 2>&1")
+# --- REVISED FIX: DIRECT PIPEWIRE/PULSE AUDIO COOKIE BRIDGE ---
+# 1. Point directly to your user's running audio server socket
+os.environ["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
 
-# 2. Tell this Root script to route audio through that public socket
-os.environ["PULSE_SERVER"] = "unix:/tmp/pulse-socket"
+# 2. Find and use your user's security cookie (since root can read any file) [2]
+cookie_paths = [
+    "/home/codegenix/.config/pulse/cookie",
+    "/home/codegenix/.pulse-cookie",
+    "/home/codegenix/.config/pulse-cookie"
+]
+for path in cookie_paths:
+    if os.path.exists(path):
+        os.environ["PULSE_COOKIE"] = path
+        break
 
-# 3. Strip the restrictive user runtime directory variable to prevent crashes
+# 3. Strip XDG_RUNTIME_DIR so the local client library doesn't complain about UID mismatch
 os.environ.pop("XDG_RUNTIME_DIR", None)
-
-# 4. (Optional) Quick diagnostic check to ensure the socket was successfully created
-if not os.path.exists("/tmp/pulse-socket"):
-    print("⚠️ WARNING: Could not establish a bridge socket to PulseAudio at /tmp/pulse-socket.")
-# ----------------------------------------------------------
+# -------------------------------------------------------------
 
 os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
+
 
 # --- The "Smart" Python 3.13 Hack ---
 class FakeImp:
@@ -30,6 +35,8 @@ class FakeImp:
         if importlib.util.find_spec(name) is None:
             raise ImportError(f"No module named {name}")
         return None
+
+
 sys.modules['imp'] = FakeImp()
 # ------------------------------------
 
@@ -38,40 +45,59 @@ import soundcard as sc
 import numpy as np
 import aubio
 import tensorflow as tf
-
-# ... (the rest of your code continues normally below this) ...
-
 import tensorflow_hub as hub
+import threading
+import time
+import csv
+import colorsys
 import speech_recognition as sr
 import pyttsx3
 from scipy.signal import butter, lfilter
 
-# Display Libraries
+# Display & Graphics Libraries
 import board
 import busio
 import digitalio
 from PIL import Image, ImageDraw
+
+# Legacy PIL-compatible SPI display driver
 from adafruit_rgb_display import ili9341 as ili9341
 
-# LED Libraries
-from rpi_ws281x import PixelStrip, Color, ws
-
 # ==========================================
-# 1. GLOBAL STATE & CONFIGURATION
+# 1. AUDIO CONFIGURATION
 # ==========================================
 RATE = 16000
-CHUNK = 512
-
-DISPLAY_CS_PIN = board.CE0
-DISPLAY_DC_PIN = board.D24
-DISPLAY_RST_PIN = board.D25
-
-LED_PIN = 13
-LED_CHANNEL = 1
-NUM_LEDS = 7
-LED_BRIGHTNESS = 100
+CHUNK = 256
 
 
+# ==========================================
+# 2. VOCAL BANDPASS FILTER (300Hz - 3000Hz)
+# ==========================================
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+
+def butter_bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=4):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return np.ascontiguousarray(y, dtype=np.float32)
+
+
+# ==========================================
+# 3. HARDWARE WIRING (From your config)
+# ==========================================
+DISPLAY_CS_PIN = board.CE0  # GPIO8
+DISPLAY_DC_PIN = board.D24  # GPIO24
+DISPLAY_RST_PIN = board.D25  # GPIO25
+
+
+# ==========================================
+# 4. GLOBAL STATE (Shared between AI & Display)
+# ==========================================
 class RobotState:
     def __init__(self):
         self.operating_mode = "AUTO"
@@ -81,13 +107,10 @@ class RobotState:
         self.bpm = 0.0
         self.genre = "Listening..."
         self.beat_hit = False
-        self.music_speed = "IDLE"  # IDLE, SLOW, MEDIUM, FAST, VOICE
+        self.music_speed = "IDLE"  # IDLE, SLOW, FAST, DANCE
         self.voice_active = False
         self.command_detected_time = 0.0
         self.body_roll = 0.0
-
-        self.last_dance_command_time = time.time()
-        self.voice_override_until = 0.0
 
         # Beat tracking history
         self.bpm_history = collections.deque(maxlen=20)
@@ -98,7 +121,7 @@ state = RobotState()
 
 
 # ==========================================
-# 2. USB SERIAL (ESP32)
+# 5. SETUP USB SERIAL (ESP32)
 # ==========================================
 def connect_to_esp32():
     print("\n🔌 Searching for ESP32 via USB...")
@@ -140,7 +163,7 @@ def esp32_reader_thread():
 
 def send_to_esp32(command):
     if not (esp32_serial and esp32_serial.is_open):
-        print(f" ⚠️ [Simulated] -> {command}")
+        print(f" [Simulated] -> {command}")
         return
     with _send_lock:
         if not _esp32_ready.wait(timeout=2.0): pass
@@ -152,7 +175,7 @@ def send_to_esp32(command):
 
 
 # ==========================================
-# 3. LED STRIP MATH & ANIMATION THREAD
+# 6. LED STRIP MATH & ANIMATION THREAD
 # ==========================================
 strip = PixelStrip(NUM_LEDS, LED_PIN, 800000, 10, False, LED_BRIGHTNESS, LED_CHANNEL, ws.WS2811_STRIP_GRB)
 strip.begin()
@@ -204,7 +227,7 @@ def led_thread():
 
         # LISTENING MODE (Green Comet)
         if va:
-            strip.setPixelColor(0, Color(0, 0, 0))  # Clear
+            strip.setPixelColor(0, Color(0, 0, 0))
             fade_to_black_by(60)
             pos = frame % (NUM_LEDS * 2 - 2)
             if pos >= NUM_LEDS: pos = NUM_LEDS * 2 - 2 - pos
@@ -257,85 +280,6 @@ def led_thread():
             for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, c_val))
             strip.show();
             time.sleep(0.03)
-
-
-# ==========================================
-# 4. LCD SCREEN ENGINE
-# ==========================================
-def init_display():
-    spi = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
-    return ili9341.ILI9341(spi, cs=digitalio.DigitalInOut(DISPLAY_CS_PIN), dc=digitalio.DigitalInOut(DISPLAY_DC_PIN),
-                           rst=digitalio.DigitalInOut(DISPLAY_RST_PIN), rotation=90, baudrate=24000000)
-
-
-def draw_rounded_rect(draw, xy, corner_radius, fill):
-    x0, y0, x1, y1 = xy
-    r = min(corner_radius, (x1 - x0) // 2, (y1 - y0) // 2)
-    if r <= 0: draw.rectangle([x0, y0, x1, y1], fill=fill); return
-    draw.rectangle([x0, y0 + r, x1, y1 - r], fill=fill)
-    draw.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
-    draw.pieslice([x0, y0, x0 + r * 2, y0 + r * 2], 180, 270, fill=fill)
-    draw.pieslice([x1 - r * 2, y1 - r * 2, x1, y1], 0, 90, fill=fill)
-    draw.pieslice([x0, y1 - r * 2, x0 + r * 2, y1], 90, 180, fill=fill)
-    draw.pieslice([x1 - r * 2, y0, x1, y0 + r * 2], 270, 360, fill=fill)
-
-
-def display_loop():
-    os.system("amixer set Master 100% > /dev/null 2>&1")
-    disp = init_display()
-
-    width, height = 320, 240
-    eye_w, eye_h = 70, 120
-    lx, rx, cy = 90, 230, 120
-    blink_timer = time.time()
-    is_blinking = False
-
-    while True:
-        with state.lock:
-            speed, beat_active, va, cmd_t, bpm, roll = state.music_speed, state.beat_hit, state.voice_active, state.command_detected_time, state.bpm, state.body_roll
-            state.beat_hit = False
-
-        dt = time.time() - cmd_t
-        bg = (255, 255, 255) if dt < 0.25 else (30, 30, 80) if dt < 1.0 else (10, 35, 15) if va else (0, 0, 0)
-        img = Image.new("RGB", (width, height), color=bg)
-        draw = ImageDraw.Draw(img)
-
-        # Telemetry Text
-        draw.text((5, 5), f"BPM: {bpm:.0f} | Mode: {state.operating_mode}", fill=(100, 100, 100))
-
-        h, col, cy_r = eye_h, (0, 255, 255), cy
-        if dt < 0.25:
-            col, h, cy_r = (0, 0, 0), int(eye_h * 0.4), cy - 10
-        elif dt < 1.0:
-            col, h, cy_r = (0, 191, 255), int(eye_h * 0.4), cy - 10
-        elif va:
-            col, h = (0, 255, 100), int(eye_h * 0.75)
-        elif speed == "FAST":
-            col, h = (255, 50, 50), eye_h + 20
-        elif speed == "MEDIUM":
-            col, h = (255, 150, 50), eye_h + 10
-        elif speed == "SLOW":
-            col, h = (150, 50, 255), int(eye_h * 0.6)
-
-        ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
-
-        if time.time() - blink_timer > np.random.uniform(2.0, 5.0):
-            is_blinking = True;
-            blink_timer = time.time()
-        if is_blinking and not va and dt > 1.0:
-            h = 10
-            if time.time() - blink_timer > 0.15: is_blinking = False
-
-        roll_offset = int(roll * 1.5)
-        cy_left, cy_right = cy_r + roll_offset, cy_r - roll_offset
-
-        draw_rounded_rect(draw, [lx - ew // 2, cy_left - h // 2, lx + ew // 2, cy_left + h // 2], corner_radius=20,
-                          fill=col)
-        draw_rounded_rect(draw, [rx - ew // 2, cy_right - h // 2, rx + ew // 2, cy_right + h // 2], corner_radius=20,
-                          fill=col)
-
-        disp.image(img)
-        time.sleep(0.03)
 
 
 # ==========================================
