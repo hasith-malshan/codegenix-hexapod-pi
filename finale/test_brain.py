@@ -1,6 +1,5 @@
 import sys
-import collections
-import traceback
+import collections  # Required for BPM tracking history
 
 # Ensure sudo can find your packages
 sys.path.append("/home/codegenix/.local/lib/python3.13/site-packages")
@@ -9,7 +8,10 @@ import importlib.util
 import os
 
 # --- REVISED FIX: DIRECT PIPEWIRE/PULSE AUDIO COOKIE BRIDGE ---
+# 1. Point directly to your user's running audio server socket
 os.environ["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
+
+# 2. Find and use your user's security cookie (since root can read any file)
 cookie_paths = [
     "/home/codegenix/.config/pulse/cookie",
     "/home/codegenix/.pulse-cookie",
@@ -19,7 +21,11 @@ for path in cookie_paths:
     if os.path.exists(path):
         os.environ["PULSE_COOKIE"] = path
         break
+
+# 3. Strip XDG_RUNTIME_DIR so the local client library doesn't complain about UID mismatch
 os.environ.pop("XDG_RUNTIME_DIR", None)
+# -------------------------------------------------------------
+
 os.environ["TFHUB_CACHE_DIR"] = "./ai_model_cache"
 
 
@@ -33,7 +39,6 @@ class FakeImp:
 
 
 sys.modules['imp'] = FakeImp()
-# ------------------------------------
 
 # Standard Python Libraries
 import serial
@@ -69,9 +74,14 @@ RATE = 16000
 CHUNK = 256
 
 
+# ==========================================
+# 2. VOCAL BANDPASS FILTER (300Hz - 3000Hz)
+# ==========================================
 def butter_bandpass(lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
-    b, a = butter(order, [lowcut / nyq, highcut / nyq], btype='band')
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
     return b, a
 
 
@@ -82,20 +92,21 @@ def butter_bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=4):
 
 
 # ==========================================
-# 2. HARDWARE WIRING
+# 3. HARDWARE WIRING (From your config)
 # ==========================================
-DISPLAY_CS_PIN = board.CE0
-DISPLAY_DC_PIN = board.D24
-DISPLAY_RST_PIN = board.D25
+DISPLAY_CS_PIN = board.CE0  # GPIO8
+DISPLAY_DC_PIN = board.D24  # GPIO24
+DISPLAY_RST_PIN = board.D25  # GPIO25
 
-LED_PIN = 13
-LED_CHANNEL = 1
-NUM_LEDS = 7
-LED_BRIGHTNESS = 100
+# --- WS2812B LED CONFIGURATION ---
+LED_PIN = 13  # GPIO13
+LED_CHANNEL = 1  # PWM Channel 1 for GPIO13
+NUM_LEDS = 7  # Adjust based on your strip length
+LED_BRIGHTNESS = 100  # Max is 255
 
 
 # ==========================================
-# 3. GLOBAL STATE
+# 4. GLOBAL STATE (Shared between AI & Display)
 # ==========================================
 class RobotState:
     def __init__(self):
@@ -104,15 +115,17 @@ class RobotState:
         self.show_audio_logs = False
 
         self.bpm = 0.0
+        self.syllable_count = 0
         self.genre = "Listening..."
         self.last_beat_time = 0.0
-        self.music_speed = "IDLE"
+        self.mood = "IDLE"  # IDLE, CHILL, ENERGY, AGGRESSIVE
         self.voice_active = False
         self.command_detected_time = 0.0
-        self.body_roll = 0.0
 
+        self.body_roll = 0.0  # IMU Tilt from ESP32
         self.manual_led_pattern = None
 
+        # Timers and tracking history
         self.last_dance_command_time = time.time()
         self.voice_override_until = 0.0
         self.bpm_history = collections.deque(maxlen=20)
@@ -123,7 +136,7 @@ state = RobotState()
 
 
 # ==========================================
-# 4. FAST USB SERIAL (ZERO LOCKS)
+# 5. SETUP USB SERIAL (ESP32) - FAST, NO LOCKS
 # ==========================================
 def connect_to_esp32():
     print("\n🔌 Searching for ESP32 via USB...")
@@ -151,7 +164,8 @@ def esp32_reader_thread():
                         roll_val = float(line.split(":")[1])
                         # Prevent NaN crashes
                         if not math.isnan(roll_val) and not math.isinf(roll_val):
-                            with state.lock: state.body_roll = roll_val
+                            with state.lock:
+                                state.body_roll = roll_val
                     except ValueError:
                         pass
             except Exception:
@@ -161,19 +175,17 @@ def esp32_reader_thread():
 
 
 def send_to_esp32(command):
-    # CRITICAL FIX: Removed all _send_lock and wait() calls.
-    # This function is now 100% non-blocking and instant.
     if not (esp32_serial and esp32_serial.is_open):
         return
     try:
         esp32_serial.write((command + "\n").encode('utf-8'))
         esp32_serial.flush()
     except Exception as e:
-        print(f"❌ Serial Error: {e}")
+        print(f"❌ Serial write error: {e}")
 
 
 # ==========================================
-# 5. LED STRIP MATH & ANIMATION THREAD
+# 6. LED STRIP MATH & ANIMATION THREAD
 # ==========================================
 strip = PixelStrip(NUM_LEDS, LED_PIN, 800000, 10, False, LED_BRIGHTNESS, LED_CHANNEL, ws.WS2811_STRIP_GRB)
 strip.begin()
@@ -199,20 +211,23 @@ def fade_to_black_by(amount):
 
 
 def led_thread():
+    """Runs the 16 complex LED animations smoothly based on AI Music Mood or Manual Overrides."""
     frame = 0
     heat = [0] * NUM_LEDS
     while True:
         try:
             with state.lock:
-                speed, va, cmd_t, manual_led = state.music_speed, state.voice_active, state.command_detected_time, state.manual_led_pattern
+                mood = state.mood
+                va = state.voice_active
+                cmd_t = state.command_detected_time
+                manual_led = state.manual_led_pattern
                 bpm = state.bpm
-                # True if a beat happened in the last 150ms
                 beat_active = (time.time() - state.last_beat_time) < 0.15
 
             dt = time.time() - cmd_t
             frame += 1
 
-            # SUCCESS FLASHES
+            # --- TOP PRIORITY: SUCCESS FLASHES ---
             if dt < 0.25:
                 for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 255, 255))
                 strip.show();
@@ -224,7 +239,7 @@ def led_thread():
                 time.sleep(0.02);
                 continue
 
-            # LISTENING MODE
+            # --- HIGH PRIORITY: LISTENING MODE ---
             if va:
                 strip.setPixelColor(0, Color(0, 0, 0))
                 fade_to_black_by(60)
@@ -235,7 +250,7 @@ def led_thread():
                 time.sleep(0.05);
                 continue
 
-            # CLI Manual Overrides
+            # --- MEDIUM PRIORITY: CLI MANUAL OVERRIDES ---
             if manual_led:
                 if manual_led == "rainbow":
                     for i in range(NUM_LEDS): strip.setPixelColor(i, hsv((frame * 5 + i * 18) % 256))
@@ -314,8 +329,8 @@ def led_thread():
                 time.sleep(0.03);
                 continue
 
-            # --- AUTO MUSIC SYNC ---
-            if speed == "FAST":
+            # --- DEFAULT: AUTO MUSIC SYNC (Mapped to Hybrid Mood) ---
+            if mood == "AGGRESSIVE":
                 if beat_active:
                     for i in range(NUM_LEDS): strip.setPixelColor(i, Color(255, 255, 255))
                 else:
@@ -331,7 +346,7 @@ def led_thread():
                                                                                                               0)
                         strip.setPixelColor(i, c)
 
-            elif speed == "MEDIUM":
+            elif mood == "ENERGY":
                 fade_to_black_by(40)
                 actual_bpm = bpm if bpm > 0 else 120
                 pos = beatsin(actual_bpm, 0, NUM_LEDS - 1)
@@ -340,14 +355,14 @@ def led_thread():
                 else:
                     strip.setPixelColor(pos, hsv(int(time.monotonic() * 50) % 256))
 
-            elif speed == "SLOW":
+            elif mood == "CHILL":
                 wave_speed = (bpm / 60.0) * 0.1 if bpm > 0 else 0.1
                 for i in range(NUM_LEDS):
                     lvl = (math.sin(frame * wave_speed - i * 0.5) + 1) / 2
                     brightness = 255 if beat_active else int(25 + lvl * 200)
                     strip.setPixelColor(i, hsv(frame + i * 10, 230, brightness))
 
-            else:
+            else:  # IDLE
                 lvl = (math.sin(frame * 0.05) + 1) / 2
                 c_val = int(10 + lvl * 80)
                 for i in range(NUM_LEDS): strip.setPixelColor(i, Color(0, c_val, c_val))
@@ -359,7 +374,7 @@ def led_thread():
 
 
 # ==========================================
-# 6. LCD DISPLAY ENGINE
+# 7. LCD DISPLAY ENGINE
 # ==========================================
 def init_display():
     spi = busio.SPI(clock=board.SCK, MOSI=board.MOSI)
@@ -382,12 +397,14 @@ def draw_rounded_rect(draw, xy, corner_radius, fill):
 def display_loop():
     try:
         disp = init_display()
-    except:
-        print("Display not found."); return
+    except Exception:
+        print("Display not found. Running headlessly.")
+        return
 
     width, height = 320, 240
     eye_w, eye_h = 70, 120
     lx, rx, cy = 90, 230, 120
+
     blink_timer = time.time()
     blink_interval = random.uniform(2.0, 5.0)
     is_blinking = False
@@ -395,7 +412,7 @@ def display_loop():
     while True:
         try:
             with state.lock:
-                speed, va, cmd_t, bpm, roll = state.music_speed, state.voice_active, state.command_detected_time, state.bpm, state.body_roll
+                mood, va, cmd_t, bpm, syl, roll = state.mood, state.voice_active, state.command_detected_time, state.bpm, state.syllable_count, state.body_roll
                 beat_active = (time.time() - state.last_beat_time) < 0.15
 
             dt = time.time() - cmd_t
@@ -403,20 +420,23 @@ def display_loop():
             img = Image.new("RGB", (width, height), color=bg)
             draw = ImageDraw.Draw(img)
 
-            draw.text((5, 5), f"BPM: {bpm:.0f} | Mode: {state.operating_mode}", fill=(100, 100, 100))
+            # Telemetry Text
+            draw.text((5, 5), f"BPM: {bpm:.0f} | Syl: {syl}/3s | Mood: {mood}", fill=(100, 100, 100))
 
             h, col, cy_r = eye_h, (0, 255, 255), cy
+
+            # Display State Machine
             if dt < 0.25:
                 col, h, cy_r = (0, 0, 0), int(eye_h * 0.4), cy - 10
             elif dt < 1.0:
                 col, h, cy_r = (0, 191, 255), int(eye_h * 0.4), cy - 10
             elif va:
                 col, h = (0, 255, 100), int(eye_h * 0.75)
-            elif speed == "FAST":
+            elif mood == "AGGRESSIVE":
                 col, h = (255, 50, 50), eye_h + 20
-            elif speed == "MEDIUM":
+            elif mood == "ENERGY":
                 col, h = (255, 150, 50), eye_h + 10
-            elif speed == "SLOW":
+            elif mood == "CHILL":
                 col, h = (150, 50, 255), int(eye_h * 0.6)
 
             ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
@@ -440,12 +460,12 @@ def display_loop():
 
             disp.image(img)
             time.sleep(0.03)
-        except Exception as e:
+        except Exception:
             time.sleep(1)
 
 
 # ==========================================
-# 7. AUDIO AI & VAD ENGINE
+# 8. AUDIO AI & VAD ENGINE
 # ==========================================
 yamnet_model = None
 YAMNET_CLASSES = []
@@ -458,7 +478,7 @@ def run_yamnet_periodically():
         yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
         with tf.io.gfile.GFile(yamnet_model.class_map_path().numpy().decode('utf-8')) as f:
             YAMNET_CLASSES = [row['display_name'] for row in csv.DictReader(f)]
-        print("✅ [AI] YAMNet Model successfully loaded!")
+        print("\n✅ [AI] YAMNet Model successfully loaded!")
     except Exception as e:
         print(f"\n❌ [AI] Failed to load YAMNet: {e}")
 
@@ -482,9 +502,9 @@ recognizer = sr.Recognizer()
 def say_phrase_offline(text):
     def _speak():
         try:
-            e = pyttsx3.init();
-            e.setProperty('rate', 145);
-            e.say(text);
+            e = pyttsx3.init()
+            e.setProperty('rate', 145)
+            e.say(text)
             e.runAndWait()
         except:
             pass
@@ -498,23 +518,37 @@ def process_voice_command(audio_bytes):
         if state.show_audio_logs: print(f"🎤 [VOICE] Recognized: '{text}'")
 
         if state.operating_mode == "AUTO":
+            matched = False
             if "stop" in text or "stand" in text:
-                send_to_esp32("STAND"); say_phrase_offline("stopping")
+                send_to_esp32("STAND");
+                say_phrase_offline("stopping");
+                matched = True
             elif "forward" in text:
-                send_to_esp32("WALK_FORWARD"); say_phrase_offline("walking forward")
+                send_to_esp32("WALK_FORWARD");
+                say_phrase_offline("walking forward");
+                matched = True
             elif "back" in text:
-                send_to_esp32("WALK_BACKWARD"); say_phrase_offline("walking backward")
-            elif "dance" in text:
-                send_to_esp32("DANCE_CIRCLE"); say_phrase_offline("party mode")
-            else:
-                with state.lock:
-                    state.voice_active = False
-                return
+                send_to_esp32("WALK_BACKWARD");
+                say_phrase_offline("walking backward");
+                matched = True
+            elif "dance" in text or "party" in text:
+                send_to_esp32("DANCE_CIRCLE");
+                say_phrase_offline("party mode");
+                matched = True
+            elif "slow" in text or "relax" in text:
+                send_to_esp32("DANCE_ROLL_SLOW");
+                say_phrase_offline("slow mode");
+                matched = True
+            elif "fast" in text or "speed" in text:
+                send_to_esp32("DANCE_ROLL_FAST");
+                say_phrase_offline("high speed");
+                matched = True
 
-            with state.lock:
-                state.command_detected_time = time.time()
-                state.voice_override_until = time.time() + 15.0
-                state.bpm_history.clear()
+            if matched:
+                with state.lock:
+                    state.command_detected_time = time.time()
+                    state.voice_override_until = time.time() + 15.0
+                    state.bpm_history.clear()
     except Exception:
         pass
     with state.lock:
@@ -545,25 +579,29 @@ def audio_listener():
                 audio_buffer = np.roll(audio_buffer, -CHUNK)
                 audio_buffer[-CHUNK:] = chunk
 
+                # VAD / Syllable Counting
                 if aubio_syllable(butter_bandpass_filter(chunk))[0]: syllables.append(now)
                 syllables = [t for t in syllables if now - t <= 3.0]
+                with state.lock:
+                    state.syllable_count = len(syllables)
 
                 with state.lock:
                     va = state.voice_active
                     override = now < state.voice_override_until
 
+                # Voice Trigger Logic
                 if len(syllables) > 8 and not va and not override:
                     with state.lock: state.voice_active = True
                     audio_bytes = (np.concatenate([audio_buffer[-RATE * 4:]]) * 32767).astype(np.int16).tobytes()
                     threading.Thread(target=process_voice_command, args=(audio_bytes,), daemon=True).start()
                     syllables.clear()
 
-                if aubio_tempo(chunk)[0] and (now - beat_debounce > 0.2):
+                # Beat Tracking
+                if aubio_tempo(chunk)[0] and (now - beat_debounce > 0.15):
                     bpm = aubio_tempo.get_bpm()
                     if 40 < bpm < 90: bpm *= 2
                     if 50 < bpm < 200:
                         with state.lock: state.bpm_history.append(bpm)
-
                     with state.lock:
                         state.last_beat_time = now
                         if len(state.bpm_history) > 0: state.bpm = np.median(list(state.bpm_history))
@@ -571,34 +609,47 @@ def audio_listener():
 
                 # Print telemetry if enabled
                 if (now - beat_debounce) < 0.05 and state.show_audio_logs:
-                    print(f"🎵 [BEAT] BPM: {state.bpm:.1f} | AI: {state.genre:15.15}")
+                    print(
+                        f"🎵 [BEAT] BPM: {state.bpm:.1f} | Syl/3s: {len(syllables):2d} | Genre: {state.genre:15.15} | Mood: {state.mood}")
 
+                # --- HYBRID AUTO DANCE & MOOD ENGINE ---
                 if state.operating_mode == "AUTO":
                     with state.lock:
                         if (now - state.last_dance_command_time) >= 3.0 and not override and not va and len(
                                 state.bpm_history) >= 3:
                             avg_bpm = np.median(list(state.bpm_history))
-                            if any(s in state.genre for s in ["Acoustic", "Vocal", "Speech"]) or avg_bpm < 100:
-                                state.music_speed, move = "SLOW", random.choice(
+                            syl = state.syllable_count
+                            genre = state.genre
+
+                            # The Hybrid Logic Tiers
+                            if any(s in genre for s in
+                                   ["Acoustic", "Classical", "Folk", "Vocal", "Speech", "Choir", "Singer"]) or (
+                                    avg_bpm < 105 and syl < 6):
+                                state.mood = "CHILL"
+                                move = random.choice(
                                     ["DANCE_ROLL_SLOW", "DANCE_CRAWL", "DANCE_BELLY_CRAWL", "DANCE_HEADBANG",
                                      "DANCE_PEACOCK", "DANCE_WAVE", "DANCE_BEG_WAVE", "DANCE_CHASSIS_BREATHE"])
-                            elif avg_bpm < 130:
-                                state.music_speed, move = "MEDIUM", random.choice(
+                            elif avg_bpm > 135 or syl > 12:  # Rap or Heavy EDM
+                                state.mood = "AGGRESSIVE"
+                                move = random.choice(
+                                    ["DANCE_ROLL_FAST", "DANCE_TWITCH", "DANCE_WORM", "DANCE_GALLOP", "DANCE_STROBE",
+                                     "DANCE_PULSE"])
+                            else:
+                                state.mood = "ENERGY"
+                                move = random.choice(
                                     ["DANCE_TWIST", "DANCE_TWIST_2", "DANCE_SALSA", "DANCE_RIPPLE", "DANCE_RIPPLE_2",
                                      "DANCE_PITCH_PIVOT", "DANCE_CIRCLE", "DANCE_CIRCLE_2"])
-                            else:
-                                state.music_speed, move = "FAST", random.choice(
-                                    ["DANCE_ROLL_FAST", "DANCE_STROBE", "DANCE_PULSE", "DANCE_TWITCH", "DANCE_WORM",
-                                     "DANCE_GALLOP"])
 
                             send_to_esp32(move)
                             state.last_dance_command_time = now
+                            state.bpm_history.clear()
+
             except Exception as e:
                 time.sleep(0.1)
 
 
 # ==========================================
-# 8. GOD-MODE CLI MENU
+# 9. GOD-MODE CLI MENU
 # ==========================================
 CLI_COMMANDS = {
     11: ("WALK_FORWARD", "Walk Fwd"), 12: ("WALK_BACKWARD", "Walk Back"), 13: ("TURN_LEFT", "Turn L"),
@@ -652,7 +703,7 @@ def print_menu():
     print("  [60] Dual Scanner  [61] Breathing     [62] Sparkle Burst")
     print("  [63] Strobe        [64] Wave          [65] Alternating")
     print("  [66] Random Palette")
-    print("  [69] RETURN LEDS TO AUTO (Music Sync)")
+    print("  [69] RETURN LEDS TO AUTO MOOD SYNC")
 
     print("\n --- DIAGNOSTICS & SYSTEM ---")
     print("  [70] to [75] Test Individual Legs 0 through 5")
@@ -682,7 +733,7 @@ def manual_testing_loop():
                 elif c == 69:
                     with state.lock:
                         state.manual_led_pattern = None
-                    print("🎵 LEDs returned to AUTO MUSIC SYNC mode.")
+                    print("🎵 LEDs returned to AUTO MOOD SYNC mode.")
                 elif c == 91:
                     state.show_audio_logs = not state.show_audio_logs
                     print(f"📡 Audio Logs turned {'ON' if state.show_audio_logs else 'OFF'}")
@@ -695,7 +746,7 @@ def manual_testing_loop():
 
 
 # ==========================================
-# 9. MASTER BOOT
+# 10. MASTER BOOT
 # ==========================================
 if __name__ == "__main__":
     print("\n" + "=" * 50 + "\n      🤖 CODEGENIX HEXABOT OS 🤖\n" + "=" * 50)
