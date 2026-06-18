@@ -10,7 +10,7 @@ import neopixel
 
 print("Modules loaded. Configuring NeoPixel strip...", flush=True)
 
-LED_PIN = board.D18
+LED_PIN = board.D13
 NUM_LEDS = 7
 BRIGHTNESS = 100 / 255
 COLOR_ORDER = neopixel.GRB
