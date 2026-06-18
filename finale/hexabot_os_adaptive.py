@@ -93,10 +93,13 @@ RATE = 16_000
 CHUNK = 512                   # 32 ms at 16 kHz
 FFT_SIZE = 2048
 TEMPO_WINDOW = 2048
-ANALYSIS_WARMUP_SECONDS = 7.0
 STATE_UPDATE_SECONDS = 1.0
-DANCE_LENGTH_BEATS = 8
 NO_BEAT_IDLE_SECONDS = 4.0
+
+# No C++ update is required for this first listening movement.  The current
+# implementation lasts roughly five seconds, during which the Pi analyses and
+# plans the next dance.
+INITIAL_LISTEN_MOVE = "DANCE_CHASSIS_BREATHE"
 
 # Automatic speech triggering is deliberately disabled: music onsets are not
 # a wake word.  Voice commands can be added later using a button/wake-word.
@@ -152,6 +155,15 @@ class RobotState:
         self.last_dance_command = "STAND"
         self.started_at = time.monotonic()
 
+        # READY-driven choreography.  Only the serial-reader thread dispatches
+        # automatic dances, so the Pi never piles commands into the ESP32's
+        # serial buffer while a blocking Arduino dance is still running.
+        self.robot_ready = False
+        self.initial_listen_sent = False
+        self.current_move = None
+        self.planned_move = None
+        self.last_plan_signature = None
+
         self.bpm_history: Deque[float] = collections.deque(maxlen=32)
         self.lock = threading.RLock()
 
@@ -185,7 +197,9 @@ def esp32_reader_thread():
             continue
         try:
             line = esp32_serial.readline().decode("utf-8", errors="ignore").strip()
-            if line.startswith("TILT:"):
+            if line == "READY":
+                handle_robot_ready()
+            elif line.startswith("TILT:"):
                 roll = float(line.split(":", 1)[1])
                 if math.isfinite(roll):
                     with state.lock:
@@ -206,6 +220,37 @@ def send_to_esp32(command: str):
         esp32_serial.flush()
     except Exception as exc:
         print(f"❌ Serial write error: {exc}")
+
+
+def handle_robot_ready():
+    """Dispatch exactly one dance whenever the ESP32 reports completion."""
+    if state.operating_mode != "AUTO":
+        with state.lock:
+            state.robot_ready = True
+        return
+
+    with state.lock:
+        state.robot_ready = True
+
+        if not state.initial_listen_sent:
+            command = INITIAL_LISTEN_MOVE
+            state.initial_listen_sent = True
+        elif state.planned_move:
+            command = state.planned_move
+            state.planned_move = None
+        else:
+            # Analysis can occasionally be uncertain.  A safe movement avoids
+            # a visible pause while preserving stability.
+            command = choose_dance(
+                state.rhythm_speed, state.energy_level, state.activity_level
+            )
+
+        state.current_move = command
+        state.robot_ready = False
+
+    send_to_esp32(command)
+    if state.show_audio_logs:
+        print(f"▶️ [READY→DANCE] {command}")
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +502,11 @@ class AdaptiveMusicAnalyzer:
 
 
 # ---------------------------------------------------------------------------
-# Beat-boundary choreography
+# READY-driven choreography and movement planning
 # ---------------------------------------------------------------------------
 DANCE_POOLS = {
     ("SLOW", "LOW", "SMOOTH"): [
-        "DANCE_CHASSIS_BREATHE", "DANCE_ROLL_SLOW", "DANCE_WAVE", "DANCE_BEG_WAVE"
+        "DANCE_CHASSIS_BREATHE", "DANCE_BEG_WAVE", "DANCE_WAVE", "DANCE_PEACOCK"
     ],
     ("SLOW", "HIGH", "BUSY"): [
         "DANCE_HEADBANG", "DANCE_PITCH_PIVOT", "DANCE_PEACOCK", "DANCE_RIPPLE"
@@ -470,7 +515,7 @@ DANCE_POOLS = {
         "DANCE_TWIST", "DANCE_CIRCLE", "DANCE_RIPPLE", "DANCE_WAVE"
     ],
     ("FAST", "HIGH", "SMOOTH"): [
-        "DANCE_CIRCLE_2", "DANCE_SALSA", "DANCE_ROLL_FAST", "DANCE_PITCH_PIVOT"
+        "DANCE_CIRCLE", "DANCE_SALSA", "DANCE_ROLL_FAST", "DANCE_PITCH_PIVOT"
     ],
     ("FAST", "HIGH", "BUSY"): [
         "DANCE_GALLOP", "DANCE_TWITCH", "DANCE_STROBE", "DANCE_PULSE", "DANCE_WORM"
@@ -488,36 +533,45 @@ def choose_dance(rhythm: str, energy: str, activity: str) -> str:
         return random.choice(exact)
 
     if energy == "LOW":
-        return random.choice(["DANCE_ROLL_SLOW", "DANCE_WAVE", "DANCE_CHASSIS_BREATHE"])
+        return random.choice(["DANCE_WAVE", "DANCE_BEG_WAVE", "DANCE_CHASSIS_BREATHE"])
     if activity == "BUSY":
-        return random.choice(["DANCE_RIPPLE_2", "DANCE_HEADBANG", "DANCE_PULSE"])
+        return random.choice(["DANCE_RIPPLE", "DANCE_HEADBANG", "DANCE_PULSE"])
     if rhythm == "FAST":
-        return random.choice(["DANCE_SALSA", "DANCE_TWIST_2", "DANCE_CIRCLE_2"])
+        return random.choice(["DANCE_SALSA", "DANCE_TWIST", "DANCE_CIRCLE"])
     return random.choice(SAFE_DANCES)
 
 
-def maybe_schedule_dance(now: float, beat_detected: bool):
-    if not beat_detected or state.operating_mode != "AUTO":
+def update_dance_plan():
+    """Keep one next movement ready while the current movement is running."""
+    if state.operating_mode != "AUTO":
         return
+
     with state.lock:
-        ready = (
-            time.monotonic() - state.started_at >= ANALYSIS_WARMUP_SECONDS
-            and state.beat_confidence >= 0.42
-            and state.beats_since_dance >= DANCE_LENGTH_BEATS
-            and now >= state.voice_override_until
-            and not state.voice_active
-        )
-        if not ready:
+        if state.voice_active or time.monotonic() < state.voice_override_until:
             return
+
         rhythm = state.rhythm_speed
         energy = state.energy_level
         activity = state.activity_level
-        state.beats_since_dance = 0
+        signature = (rhythm, energy, activity)
 
-    command = choose_dance(rhythm, energy, activity)
-    send_to_esp32(command)
+        # Preserve the existing plan while the musical profile is unchanged.
+        # Once READY consumes it, planned_move becomes None and the next
+        # one-second analysis pass prepares another movement.
+        if state.planned_move is not None and signature == state.last_plan_signature:
+            return
+
+        planned = choose_dance(rhythm, energy, activity)
+        if planned == state.current_move:
+            alternatives = [move for move in SAFE_DANCES if move != state.current_move]
+            if alternatives:
+                planned = random.choice(alternatives)
+
+        state.planned_move = planned
+        state.last_plan_signature = signature
+
     if state.show_audio_logs:
-        print(f"💃 [DANCE] {command} | {rhythm}/{energy}/{activity}")
+        print(f"🧠 [PLANNED] {planned} | {rhythm}/{energy}/{activity}")
 
 
 # ---------------------------------------------------------------------------
@@ -616,7 +670,7 @@ def process_voice_command(audio_bytes: bytes):
         elif "dance" in text or "party" in text:
             command, phrase = "DANCE_CIRCLE", "party mode"
         elif "slow" in text or "relax" in text:
-            command, phrase = "DANCE_ROLL_SLOW", "slow mode"
+            command, phrase = "DANCE_CHASSIS_BREATHE", "slow mode"
         elif "fast" in text or "speed" in text:
             command, phrase = "DANCE_ROLL_FAST", "high speed"
 
@@ -659,8 +713,8 @@ def audio_listener():
                 audio_ring.append(chunk)
 
                 now = time.monotonic()
-                beat = analyzer.process(chunk, now)
-                maybe_schedule_dance(now, beat)
+                analyzer.process(chunk, now)
+                update_dance_plan()
 
                 if state.show_audio_logs and now - last_log >= 1.0:
                     last_log = now
@@ -956,12 +1010,10 @@ CLI_COMMANDS = {
     13: ("TURN_LEFT", "Turn L"), 14: ("TURN_RIGHT", "Turn R"),
     15: ("STAND", "Stand"), 16: ("RELAX", "Deactivate"),
     21: ("DANCE_WAVE", "Wave"), 22: ("DANCE_RIPPLE", "Ripple"),
-    23: ("DANCE_RIPPLE_2", "Ripple 2"), 24: ("DANCE_PEACOCK", "Peacock"),
+    24: ("DANCE_PEACOCK", "Peacock"),
     25: ("DANCE_SALSA", "Salsa"), 26: ("DANCE_TWIST", "Twist"),
-    27: ("DANCE_TWIST_2", "Twist 2"), 28: ("DANCE_ROLL", "Roll"),
-    29: ("DANCE_ROLL_2", "Roll 2"), 30: ("DANCE_ROLL_FAST", "Fast Roll"),
-    31: ("DANCE_ROLL_SLOW", "Slow Roll"), 32: ("DANCE_CIRCLE", "Circle"),
-    33: ("DANCE_CIRCLE_2", "Circle 2"), 34: ("DANCE_CRAWL", "Crawl"),
+    30: ("DANCE_ROLL_FAST", "Fast Roll"), 32: ("DANCE_CIRCLE", "Circle"),
+    34: ("DANCE_CRAWL", "Crawl"),
     35: ("DANCE_HEADBANG", "Headbang"), 36: ("DANCE_STROBE", "Strobe"),
     37: ("DANCE_PULSE", "Pulse"), 38: ("DANCE_GALLOP", "Gallop"),
     39: ("DANCE_BEG_WAVE", "Beg Wave"), 40: ("DANCE_CHASSIS_BREATHE", "Breathe"),
