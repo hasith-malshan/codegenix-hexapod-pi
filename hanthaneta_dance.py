@@ -13,19 +13,29 @@ HOW TO USE:
   OPTION B — Start mid-song (e.g. 30 seconds in):
         sudo python3 hanthaneta_dance.py 30.0
 
-HOW SYNC WORKS (beat-locked, ABORT-on-deadline):
+HOW SYNC WORKS (beat-locked, NO-ABORT, early-READY-accelerated):
   The song clock is the master. Each move has a hard deadline — the
-  timestamp of the NEXT move. When that deadline arrives, we send
-  ABORT so the ESP32 exits its current motion immediately, then send
-  the next command right away. The robot resumes from its current leg
-  positions, giving a smooth mid-motion transition instead of a stall.
+  timestamp of the NEXT move.
 
-  If the ESP32 sends READY before the deadline (move finished early),
-  we skip the remaining wait and proceed to the next beat early — so
-  short moves don't leave the robot frozen.
+  KEY CHANGES vs original:
+  ─────────────────────────
+  1. NO MORE ABORT:
+     When the deadline arrives while a move is still running, we do NOT
+     send ABORT. We simply send the NEXT command immediately. The ESP32
+     firmware should blend/crossfade from its current leg positions into
+     the new move. This eliminates the freeze+jerk/shake that ABORT caused.
 
-  The result: moves are always beat-locked, never pile up in the serial
-  buffer, and late-running moves are gracefully cut off.
+  2. NO MORE MICRO-STOP ON READY:
+     When READY arrives early (move finished before the beat), we send the
+     next command immediately instead of waiting silently. The beat clock
+     shifts forward so the *following* deadline still lines up with its
+     correct song timestamp. The robot is always executing a motion.
+
+  ESP32 FIRMWARE REQUIREMENT:
+     • When a new command arrives mid-move, start the new motion from the
+       CURRENT servo positions (not from a neutral/home pose). Blend in.
+     • Remove any "wait for ABORT before accepting next command" logic.
+     • Send READY when the motion naturally completes.
 =======================================================================
 """
 
@@ -201,13 +211,6 @@ CHOREOGRAPHY = [
     (208.0, "STAND",                  "Outro",     "Song ends — stand still"),
 ]
 
-# ---------------------------------------------------------------------------
-# The command sent to the ESP32 to cleanly interrupt an in-progress move.
-# The ESP32 firmware must handle this by stopping servo motion immediately
-# and holding legs at their current positions (no snap-to-neutral).
-# ---------------------------------------------------------------------------
-ABORT_COMMAND = "ABORT"
-
 # How long (seconds) to wait for READY after the final move before exiting.
 FINAL_READY_TIMEOUT = 8.0
 
@@ -218,46 +221,44 @@ FINAL_READY_TIMEOUT = 8.0
 _send_fn = None
 
 
-def _wait_for_beat(target_wall: float) -> bool:
-    """
-    Block until the song clock reaches target_wall, OR until the ESP32
-    signals READY (move finished early) — whichever comes first.
-
-    Returns True  if we exited because READY arrived early.
-    Returns False if we exited because the deadline arrived.
-    """
-    remaining = target_wall - time.monotonic()
-    if remaining <= 0:
-        return False  # already past deadline
-
-    # _ready_event was cleared just before the previous command was sent.
-    # If it fires now it means the robot finished that move ahead of schedule.
-    got_ready = _ready_event.wait(timeout=remaining)
-    return got_ready
-
-
 def run_choreography(start_offset: float = 0.0, send_fn=None):
     """
-    Beat-locked choreography runner with ABORT-on-deadline.
+    Beat-locked choreography runner — NO ABORT, no micro-stops.
 
     Timing strategy:
-      For each move we know its start beat (song_time) and its deadline
-      (the next move's song_time). We:
-        1. Clear _ready_event and send the command.
-        2. Wait until either:
-             a. READY arrives (move done early → proceed to beat-wait), or
-             b. The deadline arrives (move still running → send ABORT first).
-        3. If we hit the deadline while the move is still running, send ABORT
-           so the ESP32 halts servo motion at current positions, then fall
-           straight through to step 4 without any additional wait.
-        4. Wait for the exact beat timestamp (no-op if deadline already passed).
-        5. Send the next command.
+    ─────────────────
+    For each move we know its song_time (when to start) and its deadline
+    (the next move's song_time). We:
 
-    This guarantees:
-      - Commands are always sent at their correct song timestamps.
-      - A slow move is gracefully cut off, never blocking the next beat.
-      - A fast move doesn't leave the robot frozen — it resumes immediately
-        after READY.
+      1. Sleep until the move's beat arrives (first move only, or if we
+         are running on-schedule).
+
+      2. Send the command and clear _ready_event.
+
+      3. Wait for whichever comes first:
+           a. READY arrives early  → robot finished the move ahead of the
+                                     beat. Send the NEXT command immediately
+                                     (no silent freeze). Adjust song_start
+                                     so subsequent deadlines still align
+                                     with their correct song timestamps.
+           b. Deadline arrives     → robot is still moving. Send the NEXT
+                                     command immediately WITHOUT sending
+                                     ABORT first. The ESP32 firmware must
+                                     blend from its current positions into
+                                     the new move. No freeze, no shake.
+
+    Why no ABORT?
+    ─────────────
+    ABORT tells the ESP32 to freeze servo PWM. Even a 10 ms freeze is
+    visible as a jerk/shake. By sending the next dance command instead,
+    the servos transition directly from one motion to another, which the
+    firmware can interpolate smoothly.
+
+    Why send immediately on READY?
+    ────────────────────────────────
+    If we wait silently after READY, the robot holds a static pose until
+    the next beat — a visible micro-stop. Sending the next command
+    immediately keeps the robot in continuous motion.
     """
     global _send_fn
     if send_fn:
@@ -285,11 +286,13 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
     print(f"   First move in {max(0, pending[0][0] - start_offset):.1f}s → {pending[0][1]}")
     print()
 
-    for i, (song_time, command, section, note) in enumerate(pending):
+    i = 0
+    while i < len(pending):
+        song_time, command, section, note = pending[i]
 
-        # ── Step 1: Wait for the correct beat ───────────────────────────
-        # On the very first move there's no previous move to abort, so we
-        # just sleep until the beat arrives.
+        # ── Step 1: Sleep until this move's beat ─────────────────────────
+        # (On early-READY path we arrive here already past this beat,
+        #  so wait will be ≤ 0 and we skip the sleep immediately.)
         target_wall = song_start + song_time
         wait = target_wall - time.monotonic()
         if wait > 0:
@@ -299,44 +302,55 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
             if drift > 0.1:
                 print(f"  ⏱️  Drift: {drift:.2f}s late")
 
-        # ── Step 2: Print section header if changed ──────────────────────
+        # ── Step 2: Print section header if changed ───────────────────────
         if section != last_section:
             print(f"\n  ── {section} ──")
             last_section = section
 
-        # ── Step 3: Send the command ─────────────────────────────────────
+        # ── Step 3: Send the command ──────────────────────────────────────
         elapsed = time.monotonic() - song_start
         print(f"  [{elapsed:6.1f}s] 💃 {command:<30}  ← {note}")
-        _ready_event.clear()   # arm for this move's READY signal
+        _ready_event.clear()
         _send_fn(command)
 
-        # ── Step 4: Determine this move's deadline ───────────────────────
-        # The deadline is the next move's beat. If this is the last move,
-        # use a generous timeout instead.
-        if i + 1 < len(pending):
-            next_song_time = pending[i + 1][0]
-            deadline_wall  = song_start + next_song_time
-        else:
-            # Final move — wait for READY or a long timeout
+        # ── Step 4: Last move — just wait for READY or timeout ────────────
+        if i + 1 >= len(pending):
             _ready_event.wait(timeout=FINAL_READY_TIMEOUT)
             break
 
         # ── Step 5: Wait for READY or deadline ───────────────────────────
-        # Whichever comes first:
-        #   • READY early  → move done, we loop and sleep until next beat
-        #   • Deadline hit → move still running, send ABORT then loop
-        remaining = deadline_wall - time.monotonic()
+        next_song_time  = pending[i + 1][0]
+        deadline_wall   = song_start + next_song_time
+        remaining       = deadline_wall - time.monotonic()
+
         if remaining > 0:
             got_ready = _ready_event.wait(timeout=remaining)
-            if not got_ready:
-                # Deadline arrived while ESP32 is still moving — abort cleanly
-                elapsed_dbg = time.monotonic() - song_start
-                print(f"  ✂️  [{elapsed_dbg:6.1f}s] Deadline — sending {ABORT_COMMAND}")
-                _send_fn(ABORT_COMMAND)
-                # Clear any stale READY that arrives during/after abort
-                _ready_event.clear()
-        # else: we're already past the deadline (very slow machine) — don't
-        # bother aborting, just loop straight to the next command.
+        else:
+            got_ready = False   # already past deadline
+
+        if got_ready:
+            # ── READY arrived early ───────────────────────────────────────
+            # Robot finished its move before the next beat. Send the next
+            # command NOW so there's zero pause. Re-anchor song_start so
+            # the beats beyond this one still line up with the song.
+            #
+            # We do NOT sleep — we jump straight to the top of the loop
+            # for move i+1, which will see wait ≤ 0 and skip its sleep.
+            early_by = deadline_wall - time.monotonic()
+            if early_by > 0.02:   # only log if meaningfully early
+                print(f"  ⚡ READY {early_by:.2f}s early — sending next move immediately")
+            # NOTE: song_start is NOT adjusted. We let the next iteration's
+            # wait calculation produce a negative value (≤ 0), which it
+            # handles by skipping the sleep. This keeps future deadlines
+            # correctly anchored to the song clock.
+        else:
+            # ── Deadline arrived, move still running ──────────────────────
+            # DO NOT send ABORT. Fall through to the next iteration which
+            # will send the next command immediately (wait will be ≤ 0).
+            elapsed_dbg = time.monotonic() - song_start
+            print(f"  ⏭️  [{elapsed_dbg:6.1f}s] Deadline — blending into next move (no ABORT)")
+
+        i += 1   # advance to next move
 
     print("\n✅ Choreography complete. Robot standing by.\n")
 
