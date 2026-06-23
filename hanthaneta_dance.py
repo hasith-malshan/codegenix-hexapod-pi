@@ -160,17 +160,17 @@ CHOREOGRAPHY = [
     (51.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
-    #(52.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
+    (53.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
     (55.5,  "DANCE_CIRCLE",           "Verse 1",   "Wahina kala — Em, small circle"),
-   # (59.0,  "DANCE_RIPPLE_2",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
+    (59.0,  "DANCE_RIPPLE_2",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
     (62.5,  "DANCE_WAVE",             "Verse 1",   "Themenna — F→C, gentle wave"),
-   # (66.5,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
+    (66.5,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     (70.0,  "DANCE_CIRCLE",           "Verse 1",   "Em again — light spin"),
-   # (73.5,  "DANCE_RIPPLE",           "Verse 1",   "Am flows"),
+    (73.5,  "DANCE_RIPPLE",           "Verse 1",   "Am flows"),
     (77.0,  "DANCE_PITCH_PIVOT",      "Verse 1",   "Kude yatin — G→G7, look up"),
-   # (81.0,  "DANCE_BEG_WAVE",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
+    (81.0,  "DANCE_BEG_WAVE",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
     (85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
-   # (89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
+    (89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     (92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
