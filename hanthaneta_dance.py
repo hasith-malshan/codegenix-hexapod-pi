@@ -137,11 +137,11 @@ def _resolve_send_fn():
 CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
     (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
-    (3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
-    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (9.5,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (12.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
-    (16.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
+   # (3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
+    #(6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+   # (9.5,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+   # (12.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    #(16.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
     (20.0,  "DANCE_RIPPLE",           "Chorus 1",  "Moonlight ripple — C"),
