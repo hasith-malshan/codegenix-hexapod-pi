@@ -7,56 +7,44 @@
 =======================================================================
 
 HOW TO USE:
-
-  OPTION A — Run from inside hexabot_os.py (RECOMMENDED):
-    At the bottom of hexabot_os.py, add:
-        from hanthaneta_dance import run_choreography
-        run_choreography()
-
-  OPTION B — Run standalone (no hexabot_os.py needed):
+  OPTION A — Standalone:
         sudo python3 hanthaneta_dance.py
 
-  OPTION C — Start mid-song (e.g. 30 seconds in):
+  OPTION B — Start mid-song (e.g. 30 seconds in):
         sudo python3 hanthaneta_dance.py 30.0
 
-SONG STRUCTURE (timestamps are approximate at 152 BPM):
-  0:00  Intro          — soft, swaying
-  0:20  Chorus (1st)   — emotional peak, flowing
-  0:52  Verse 1        — gentle exploration
-  1:30  Inter          — soft break
-  1:50  Chorus (2nd)   — bigger, more expressive
-  2:22  Verse 2        — build toward ending
-  3:00  Outro/Fade     — winding down
+HOW SYNC WORKS (beat-locked, ABORT-on-deadline):
+  The song clock is the master. Each move has a hard deadline — the
+  timestamp of the NEXT move. When that deadline arrives, we send
+  ABORT so the ESP32 exits its current motion immediately, then send
+  the next command right away. The robot resumes from its current leg
+  positions, giving a smooth mid-motion transition instead of a stall.
+
+  If the ESP32 sends READY before the deadline (move finished early),
+  we skip the remaining wait and proceed to the next beat early — so
+  short moves don't leave the robot frozen.
+
+  The result: moves are always beat-locked, never pile up in the serial
+  buffer, and late-running moves are gracefully cut off.
 =======================================================================
 """
 
 import time
 import threading
 import sys
-import os
-import math
 
 # ---------------------------------------------------------------------------
 # Serial / Send Setup
 # ---------------------------------------------------------------------------
-# Try to reuse the already-open connection from hexabot_os.py.
-# If this script is run standalone, we open our own serial connection.
-# IMU (TILT) data from ESP32 is simply ignored — it does not block anything.
-# ---------------------------------------------------------------------------
 
-_send_fn = None       # Will hold the send_to_esp32 function we'll use
-_serial_obj = None    # Only used in standalone mode
+_serial_obj = None
+_ready_event = threading.Event()   # set when ESP32 sends "READY"
+
 
 def _init_standalone():
-    """Open serial in standalone mode, with no dependency on hexabot_os.py."""
     global _serial_obj
 
     import serial
-    import logging
-
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hexabot.log")
-    logging.basicConfig(filename=log_path, level=logging.INFO,
-                        format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 
     for port in ("/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0", "/dev/serial0"):
         try:
@@ -68,67 +56,72 @@ def _init_standalone():
 
     if _serial_obj is None:
         print("⚠️  ESP32 not found — SIMULATION MODE (commands printed only).")
+        return
 
-    # Background reader: drains ESP32 output (TILT spam etc.) without blocking
-    def _drain_esp32():
+    def _reader():
+        """
+        Reads all ESP32 output continuously.
+        - TILT lines  → silently dropped (IMU noise)
+        - READY       → sets _ready_event so choreography can proceed early
+        - anything else → printed for debugging
+        """
         while True:
             if _serial_obj and _serial_obj.is_open:
                 try:
-                    line = _serial_obj.readline().decode("utf-8", errors="ignore").strip()
-                    # Silently drop TILT lines; print everything else
-                    if line and not line.startswith("TILT:"):
+                    raw = _serial_obj.readline()
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
+                    if line.startswith("TILT:"):
+                        pass  # drop silently
+                    elif line == "READY":
+                        _ready_event.set()
+                        print(f"  ✅ ESP32: READY")
+                    else:
                         print(f"  🤖 ESP32: {line}")
                 except Exception:
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             else:
                 time.sleep(0.1)
 
-    threading.Thread(target=_drain_esp32, daemon=True).start()
+    threading.Thread(target=_reader, daemon=True).start()
 
-    def _send(command: str):
-        print(f"  📡 SEND → {command}")
-        if _serial_obj and _serial_obj.is_open:
-            try:
-                _serial_obj.write((command + "\n").encode("utf-8"))
-                _serial_obj.flush()
-            except Exception as e:
-                print(f"  ❌ Serial error: {e}")
 
-    return _send
+def _send(command: str):
+    """Send a command to ESP32, or print it in simulation mode."""
+    print(f"  📡 SEND → {command}")
+    if _serial_obj and _serial_obj.is_open:
+        try:
+            _serial_obj.write((command + "\n").encode("utf-8"))
+            _serial_obj.flush()
+        except Exception as e:
+            print(f"  ❌ Serial error: {e}")
 
 
 def _resolve_send_fn():
     """
-    Return the best available send_to_esp32 function.
-    Priority:
-      1. hexabot_os.py is the __main__ module  → reuse its send_to_esp32
-      2. hexabot_os was imported elsewhere      → import from it
-      3. Standalone                             → open our own serial
+    If hexabot_os.py is already running, reuse its serial + reader.
+    Otherwise open our own connection in standalone mode.
     """
-    # Case 1: launched via hexabot_os.py
-    import sys
     main_mod = sys.modules.get("__main__")
     if main_mod and hasattr(main_mod, "send_to_esp32"):
         print("✅ Reusing send_to_esp32 from running Hexabot OS.")
         return main_mod.send_to_esp32
 
-    # Case 2: hexabot_os was imported as a module
     hexabot = sys.modules.get("hexabot_os")
     if hexabot and hasattr(hexabot, "send_to_esp32"):
         print("✅ Reusing send_to_esp32 from imported hexabot_os module.")
         return hexabot.send_to_esp32
 
-    # Case 3: standalone
     print("ℹ️  Running in STANDALONE mode.")
-    return _init_standalone()
+    _init_standalone()
+    return _send
 
 
 # ---------------------------------------------------------------------------
 # Choreography Timeline
 # ---------------------------------------------------------------------------
 # Each entry: (song_time_seconds, dance_command, section_label, note)
-#
-# Beat interval at 152 BPM = 0.395 s
 # ---------------------------------------------------------------------------
 
 CHOREOGRAPHY = [
@@ -208,17 +201,63 @@ CHOREOGRAPHY = [
     (208.0, "STAND",                  "Outro",     "Song ends — stand still"),
 ]
 
+# ---------------------------------------------------------------------------
+# The command sent to the ESP32 to cleanly interrupt an in-progress move.
+# The ESP32 firmware must handle this by stopping servo motion immediately
+# and holding legs at their current positions (no snap-to-neutral).
+# ---------------------------------------------------------------------------
+ABORT_COMMAND = "ABORT"
+
+# How long (seconds) to wait for READY after the final move before exiting.
+FINAL_READY_TIMEOUT = 8.0
 
 # ---------------------------------------------------------------------------
 # Choreography Runner
 # ---------------------------------------------------------------------------
+
+_send_fn = None
+
+
+def _wait_for_beat(target_wall: float) -> bool:
+    """
+    Block until the song clock reaches target_wall, OR until the ESP32
+    signals READY (move finished early) — whichever comes first.
+
+    Returns True  if we exited because READY arrived early.
+    Returns False if we exited because the deadline arrived.
+    """
+    remaining = target_wall - time.monotonic()
+    if remaining <= 0:
+        return False  # already past deadline
+
+    # _ready_event was cleared just before the previous command was sent.
+    # If it fires now it means the robot finished that move ahead of schedule.
+    got_ready = _ready_event.wait(timeout=remaining)
+    return got_ready
+
+
 def run_choreography(start_offset: float = 0.0, send_fn=None):
     """
-    Runs the predefined choreography timeline.
+    Beat-locked choreography runner with ABORT-on-deadline.
 
-    Args:
-        start_offset: Seconds already elapsed in the song (to skip ahead).
-        send_fn:      Optional custom send function. If None, auto-detected.
+    Timing strategy:
+      For each move we know its start beat (song_time) and its deadline
+      (the next move's song_time). We:
+        1. Clear _ready_event and send the command.
+        2. Wait until either:
+             a. READY arrives (move done early → proceed to beat-wait), or
+             b. The deadline arrives (move still running → send ABORT first).
+        3. If we hit the deadline while the move is still running, send ABORT
+           so the ESP32 halts servo motion at current positions, then fall
+           straight through to step 4 without any additional wait.
+        4. Wait for the exact beat timestamp (no-op if deadline already passed).
+        5. Send the next command.
+
+    This guarantees:
+      - Commands are always sent at their correct song timestamps.
+      - A slow move is gracefully cut off, never blocking the next beat.
+      - A fast move doesn't leave the robot frozen — it resumes immediately
+        after READY.
     """
     global _send_fn
     if send_fn:
@@ -238,31 +277,72 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
         print("❌ No moves left for the given start offset.")
         return
 
-    start_time = time.monotonic() - start_offset
+    # Anchor the song clock
+    song_start = time.monotonic() - start_offset
     last_section = None
 
     print(f"\n▶  Starting choreography (offset = {start_offset:.1f}s)...")
-    print(f"   First move in {pending[0][0] - start_offset:.1f}s → {pending[0][1]}\n")
+    print(f"   First move in {max(0, pending[0][0] - start_offset):.1f}s → {pending[0][1]}")
+    print()
 
-    for song_time, command, section, note in pending:
-        target_time = start_time + song_time
-        sleep_duration = target_time - time.monotonic()
-        if sleep_duration > 0:
-            time.sleep(sleep_duration)
+    for i, (song_time, command, section, note) in enumerate(pending):
 
+        # ── Step 1: Wait for the correct beat ───────────────────────────
+        # On the very first move there's no previous move to abort, so we
+        # just sleep until the beat arrives.
+        target_wall = song_start + song_time
+        wait = target_wall - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        else:
+            drift = -wait
+            if drift > 0.1:
+                print(f"  ⏱️  Drift: {drift:.2f}s late")
+
+        # ── Step 2: Print section header if changed ──────────────────────
         if section != last_section:
             print(f"\n  ── {section} ──")
             last_section = section
 
-        elapsed = time.monotonic() - start_time
+        # ── Step 3: Send the command ─────────────────────────────────────
+        elapsed = time.monotonic() - song_start
         print(f"  [{elapsed:6.1f}s] 💃 {command:<30}  ← {note}")
+        _ready_event.clear()   # arm for this move's READY signal
         _send_fn(command)
+
+        # ── Step 4: Determine this move's deadline ───────────────────────
+        # The deadline is the next move's beat. If this is the last move,
+        # use a generous timeout instead.
+        if i + 1 < len(pending):
+            next_song_time = pending[i + 1][0]
+            deadline_wall  = song_start + next_song_time
+        else:
+            # Final move — wait for READY or a long timeout
+            _ready_event.wait(timeout=FINAL_READY_TIMEOUT)
+            break
+
+        # ── Step 5: Wait for READY or deadline ───────────────────────────
+        # Whichever comes first:
+        #   • READY early  → move done, we loop and sleep until next beat
+        #   • Deadline hit → move still running, send ABORT then loop
+        remaining = deadline_wall - time.monotonic()
+        if remaining > 0:
+            got_ready = _ready_event.wait(timeout=remaining)
+            if not got_ready:
+                # Deadline arrived while ESP32 is still moving — abort cleanly
+                elapsed_dbg = time.monotonic() - song_start
+                print(f"  ✂️  [{elapsed_dbg:6.1f}s] Deadline — sending {ABORT_COMMAND}")
+                _send_fn(ABORT_COMMAND)
+                # Clear any stale READY that arrives during/after abort
+                _ready_event.clear()
+        # else: we're already past the deadline (very slow machine) — don't
+        # bother aborting, just loop straight to the next command.
 
     print("\n✅ Choreography complete. Robot standing by.\n")
 
 
 # ---------------------------------------------------------------------------
-# Entry Point (standalone mode)
+# Entry Point (standalone)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     print("\n🎵 Hanthanata Payana Sanda — Hexabot Choreography")
@@ -276,8 +356,6 @@ if __name__ == "__main__":
         except ValueError:
             pass
 
-    # Resolve serial connection before asking user to press Enter
-    # so any "ESP32 not found" warnings appear before the countdown.
     _send_fn = _resolve_send_fn()
 
     print("\n  Start the song NOW, then press Enter...")
