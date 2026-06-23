@@ -144,7 +144,7 @@ CHOREOGRAPHY = [
     (19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
-    (20.0,  "DANCE_CHASSIS_BREATHE",           "Chorus 1",  "Moonlight ripple — C"),
+    (20.0,  "DANCE_RIPPLE",           "Chorus 1",  "Moonlight ripple — C"),
     (20.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Swaying look up to the moon — Am"),
     (25.5,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
     (26.5,  "DANCE_CHASSIS_BREATHE",           "Chorus 1",  "Cascade back — C"),
@@ -174,43 +174,43 @@ CHOREOGRAPHY = [
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     (92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
-   # (96.0,  "DANCE_BEG_WAVE",         "Inter",     "Inter Am"),
+    (96.0,  "DANCE_BEG_WAVE",         "Inter",     "Inter Am"),
     (100.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
-   # (104.0, "DANCE_PEACOCK",          "Inter",     "Inter G — hold display"),
+    (104.0, "DANCE_PEACOCK",          "Inter",     "Inter G — hold display"),
     (108.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
 
     # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
-   # (110.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+   #(110.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
     (113.0, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
-   # (116.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
+    (116.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
     (119.5, "DANCE_RIPPLE",           "Chorus 2",  "C — cascade"),
-    #(122.5, "DANCE_HEADBANG",         "Chorus 2",  "G — emotional head nod"),
+    (122.5, "DANCE_HEADBANG",         "Chorus 2",  "G — emotional head nod"),
     (125.5, "DANCE_SALSA",            "Chorus 2",  "G7 — energy salsa"),
-   # (128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
+    (128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
     (131.5, "DANCE_TWIST",            "Chorus 2",  "G — spinning twist"),
-   # (134.5, "DANCE_ROLL_FAST",        "Chorus 2",  "G7 — quick spin"),
+    (134.5, "DANCE_ROLL_FAST",        "Chorus 2",  "G7 — quick spin"),
     (137.5, "DANCE_RIPPLE",           "Chorus 2",  "C — waterfall ripple"),
-   # (141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
+    (141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
 
     # ── VERSE 2 (2:22 – 3:00) ───────────────────────────────────────────
     (142.0, "DANCE_TWIST",            "Verse 2",   "Latha madulu — C"),
-    #(145.5, "DANCE_CIRCLE",           "Verse 2",   "Atha wanawi — Em, circle"),
+    (145.5, "DANCE_CIRCLE",           "Verse 2",   "Atha wanawi — Em, circle"),
     (149.0, "DANCE_RIPPLE_2",         "Verse 2",   "Epa ahaka — Am"),
-    #(152.5, "DANCE_WAVE",             "Verse 2",   "Balanna — F→C"),
+    (152.5, "DANCE_WAVE",             "Verse 2",   "Balanna — F→C"),
     (156.5, "DANCE_TWIST",            "Verse 2",   "Repeat — C"),
-    #(160.0, "DANCE_CIRCLE",           "Verse 2",   "Em"),
+    (160.0, "DANCE_CIRCLE",           "Verse 2",   "Em"),
     (163.5, "DANCE_PITCH_PIVOT",      "Verse 2",   "Maa geana — G, emotional sway"),
-    #(167.5, "DANCE_HEADBANG",         "Verse 2",   "Mathakaya guli — G7, nodding"),
+    (167.5, "DANCE_HEADBANG",         "Verse 2",   "Mathakaya guli — G7, nodding"),
     (171.5, "DANCE_PEACOCK",          "Verse 2",   "Maha weal — C, grand display"),
-    #(175.5, "DANCE_SALSA",            "Verse 2",   "Iyata — G, rising"),
+    (175.5, "DANCE_SALSA",            "Verse 2",   "Iyata — G, rising"),
     (179.5, "DANCE_RIPPLE",           "Verse 2",   "Damanna — C, flowing resolve"),
 
     # ── OUTRO / FADE (3:00 – end) ────────────────────────────────────────
-    #(183.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Settle — C"),
+    (183.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Settle — C"),
     (187.0, "DANCE_WAVE",             "Outro",     "Farewell wave — Am"),
-    #(191.0, "DANCE_BEG_WAVE",         "Outro",     "Last moonlit beg — F"),
+    (191.0, "DANCE_BEG_WAVE",         "Outro",     "Last moonlit beg — F"),
     (196.0, "DANCE_PEACOCK",          "Outro",     "Final open display — G7→C"),
-    #(201.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Breathe and rest"),
+    (201.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Breathe and rest"),
     (208.0, "STAND",                  "Outro",     "Song ends — stand still"),
 ]
 
