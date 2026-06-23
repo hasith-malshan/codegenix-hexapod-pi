@@ -151,11 +151,12 @@ CHOREOGRAPHY = [
     (29.5,  "DANCE_ROLL",             "Chorus 1",  "Gentle roll on G"),
     (33.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
     (34.5,  "DANCE_WAVE",             "Chorus 1",  "Chorus resolve — C"),
-    (38.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
-    (41.5,  "DANCE_RIPPLE",           "Chorus 1",  "Ripple through — G7"),
-    (44.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
-    (48.0,  "DANCE_RIPPLE",           "Chorus 1",  "Moonlight ripple — C"),
-    (52.0,  "DANCE_WAVE",             "Chorus 1",  "Bridge into verse"),
+    (35.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (38.5,  "DANCE_RIPPLE",           "Chorus 1",  "Ripple through — G7"),
+    (42.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    (45.0,  "DANCE_RIPPLE",           "Chorus 1",  "Moonlight ripple — C"),
+    (48.0,  "DANCE_WAVE",             "Chorus 1",  "Bridge into verse"),
+    (50.5,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
     #(52.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
