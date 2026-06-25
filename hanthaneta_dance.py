@@ -136,18 +136,19 @@ def _resolve_send_fn():
 
 CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
-    (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+  ##  (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
    # (3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
-    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+  ##  (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+  ##  (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+  ##  (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
-    (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
-    (24.0,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
-    (25.5,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
-    (26.8,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
+    #21.5
+    (0.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (2.5,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
+    (4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
+    (5.3,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
     (27.5,  "DANCE_BEG_WAWE",             "Chorus 1",  "Gentle roll on G"),
     (30.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
     (31.5,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
