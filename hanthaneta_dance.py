@@ -163,7 +163,7 @@ CHOREOGRAPHY = [
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
     (0.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
-    (7.0,  "DANCE_BEG_WAVE",           "Verse 1",   "Wahina kala — Em, small circle"),
+    (8.5,  "DANCE_BEG_WAVE",           "Verse 1",   "Wahina kala — Em, small circle"),
     (59.0,  "DANCE_RIPPLE_2",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
     (62.5,  "DANCE_WAVE",             "Verse 1",   "Themenna — F→C, gentle wave"),
     (66.5,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
