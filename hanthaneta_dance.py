@@ -155,7 +155,7 @@ CHOREOGRAPHY = [
     (14.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
     (21.2,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
     #(21.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
-    (25.0,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    (23.0,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
     #(26.5,  "DANCE_BELLY_CRAWL",           "Chorus 1",  "Moonlight ripple — C"),
     (42.0,  "DANCE_WAVE",             "Chorus 1",  "Bridge into verse"),
     (46.5,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
