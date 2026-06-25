@@ -169,20 +169,21 @@ CHOREOGRAPHY = [
     ##(67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
     ##(74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     #82.0
-    (82.0,  "DANCE_ROLL_SLOW",           "Verse 1",   "Em again — light spin"),
+    ##(82.0,  "DANCE_ROLL_SLOW",           "Verse 1",   "Em again — light spin"),
     #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
     #90.0
-    ##(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
+    ####(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
     #(46.5,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
     #(85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
     #(89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     #92.0
-    (89.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
-    (95.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (95.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (103.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    ##(89.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    ##(95.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    ##(95.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    #103.5
+    (0.0,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
     #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
     #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
@@ -190,16 +191,17 @@ CHOREOGRAPHY = [
     #(105.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
 
     # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
-    (109.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
-    (113.0, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
-    (116.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
-    (119.5, "DANCE_RIPPLE",           "Chorus 2",  "C — cascade"),
-    (122.5, "DANCE_HEADBANG",         "Chorus 2",  "G — emotional head nod"),
+    #109.0
+    (5.5, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+    (9.5, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
+    (17.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
+    (119.5, "DANCE_PEOCOCK",           "Chorus 2",  "C — cascade"),
+    (122.5, "DANCE_CHASSIS_BREATH",         "Chorus 2",  "G — emotional head nod"),
     (125.5, "DANCE_SALSA",            "Chorus 2",  "G7 — energy salsa"),
     (128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
     (131.5, "DANCE_TWIST",            "Chorus 2",  "G — spinning twist"),
-    (134.5, "DANCE_ROLL_FAST",        "Chorus 2",  "G7 — quick spin"),
-    (137.5, "DANCE_RIPPLE",           "Chorus 2",  "C — waterfall ripple"),
+    (134.5, "DANCE_ROLL_SLOW",        "Chorus 2",  "G7 — quick spin"),
+    (137.5, "DANCE_ROLL",           "Chorus 2",  "C — waterfall ripple"),
     (141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
 
     # ── VERSE 2 (2:22 – 3:00) ───────────────────────────────────────────
