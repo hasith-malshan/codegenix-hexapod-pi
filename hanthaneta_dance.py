@@ -192,17 +192,26 @@ CHOREOGRAPHY = [
 
     # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
     #109.0
-    (5.5, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
-    (9.5, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
-    (17.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
-    (119.5, "DANCE_PEOCOCK",           "Chorus 2",  "C — cascade"),
-    (122.5, "DANCE_CHASSIS_BREATH",         "Chorus 2",  "G — emotional head nod"),
-    (125.5, "DANCE_SALSA",            "Chorus 2",  "G7 — energy salsa"),
-    (128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
-    (131.5, "DANCE_TWIST",            "Chorus 2",  "G — spinning twist"),
-    (134.5, "DANCE_ROLL_SLOW",        "Chorus 2",  "G7 — quick spin"),
-    (137.5, "DANCE_ROLL",           "Chorus 2",  "C — waterfall ripple"),
-    (141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
+    #(5.5, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+    #(9.5, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
+    #(17.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
+    #(119.5, "DANCE_PEOCOCK",           "Chorus 2",  "C — cascade"),
+    #(122.5, "DANCE_CHASSIS_BREATH",         "Chorus 2",  "G — emotional head nod"),
+    #(125.5, "DANCE_SALSA",            "Chorus 2",  "G7 — energy salsa"),
+    #(128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
+    #(131.5, "DANCE_TWIST",            "Chorus 2",  "G — spinning twist"),
+    #(134.5, "DANCE_ROLL_SLOW",        "Chorus 2",  "G7 — quick spin"),
+    #(137.5, "DANCE_ROLL",           "Chorus 2",  "C — waterfall ripple"),
+    #(141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
+
+#5.5   #21.5
+    (5.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (7.0,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
+    (14.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
+    (24.0,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    (28.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
+    (29.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
     # ── VERSE 2 (2:22 – 3:00) ───────────────────────────────────────────
     (142.0, "DANCE_TWIST",            "Verse 2",   "Latha madulu — C"),
