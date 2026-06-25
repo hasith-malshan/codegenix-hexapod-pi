@@ -170,8 +170,8 @@ CHOREOGRAPHY = [
     (21.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     (29.0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
     (37.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
-    (42.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
-    (46.5,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
+    (43.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
+    #(46.5,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
     (85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
     (89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
