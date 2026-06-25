@@ -178,10 +178,10 @@ CHOREOGRAPHY = [
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     #92.0
-    (2.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
-    (8.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (8.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (16.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    (3.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (9.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (9.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (17.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
     #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
     #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
