@@ -145,8 +145,8 @@ CHOREOGRAPHY = [
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
     (20.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
-    (21.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Swaying look up to the moon — Am"),
-    (25.5,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
+    (21.5,  "DANCE_PEACOCK",      "Chorus 1",  "Swaying look up to the moon — Am"),
+    (23.5,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
     (25.8,  "DANCE_CHASSIS_BREATHE",           "Chorus 1",  "Cascade back — C"),
     (29.5,  "DANCE_ROLL",             "Chorus 1",  "Gentle roll on G"),
     (30.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
