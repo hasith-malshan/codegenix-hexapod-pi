@@ -167,7 +167,7 @@ CHOREOGRAPHY = [
    # (8.5,  "DANCE_BEG_WAVE",           "Verse 1",   "Wahina kala — Em, small circle"),
     (8.0,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
     (14.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
-    (66.5,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
+    (16.5,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     (70.0,  "DANCE_BEG_WAVE",           "Verse 1",   "Em again — light spin"),
     (73.5,  "DANCE_RIPPLE",           "Verse 1",   "Am flows"),
     (77.0,  "DANCE_PITCH_PIVOT",      "Verse 1",   "Kude yatin — G→G7, look up"),
