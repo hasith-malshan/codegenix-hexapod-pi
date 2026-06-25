@@ -176,14 +176,19 @@ CHOREOGRAPHY = [
     #(89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
-    (92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
-    (92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
-    (94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
-    (98.0, "DANCE_PEACOCK",          "Inter",     "Inter G — hold display"),
-    (105.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
+    #0.0
+    (92.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (98.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (98.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (106.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
+    #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
+    #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
+    #(98.0, "DANCE_PEACOCK",          "Inter",     "Inter G — hold display"),
+    #(105.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
 
     # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
-   #(110.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+    (110.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
     (113.0, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
     (116.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
     (119.5, "DANCE_RIPPLE",           "Chorus 2",  "C — cascade"),
