@@ -168,7 +168,8 @@ CHOREOGRAPHY = [
     ##(61.0,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
     ##(67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
     ##(74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
-    ##(82.0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
+    #82.0
+    0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
     #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
     #90.0
     ##(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
@@ -178,10 +179,10 @@ CHOREOGRAPHY = [
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     #92.0
-    (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
-    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    (8.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (14.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (14.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (20.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
     #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
     #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
