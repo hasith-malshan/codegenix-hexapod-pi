@@ -159,21 +159,22 @@ CHOREOGRAPHY = [
     #(25.0,  "DANCE_PITCH_PIVOT",             "Chorus 1",  "Bridge into verse"),
     #(29.0,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
     ##(49.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
-    ##(51.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    #51.0
+    (1.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
     #53.0
-    (0.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
+    (3.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
    # (8.5,  "DANCE_BEG_WAVE",           "Verse 1",   "Wahina kala — Em, small circle"),
-    (8.0,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
-    (14.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
-    (21.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
-    (29.0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
-    (37.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
-    (45.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
+    (61.0,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
+    (67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
+    (74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
+    (82.0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
+    #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
+    (90.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
     #(46.5,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
-    (85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
-    (89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
+    #(85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
+    #(89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     (92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
