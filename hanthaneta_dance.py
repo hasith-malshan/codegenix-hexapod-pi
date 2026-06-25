@@ -169,7 +169,7 @@ CHOREOGRAPHY = [
     ##(67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
     ##(74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     #82.0
-    0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
+    (0.0,  "DANCE_CHASSIS_BREATHE",           "Verse 1",   "Em again — light spin"),
     #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
     #90.0
     ##(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
