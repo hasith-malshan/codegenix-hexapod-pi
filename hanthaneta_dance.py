@@ -147,7 +147,7 @@ CHOREOGRAPHY = [
     #21.5
     (0.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
     #(2.5,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
-    (4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
+    #(4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
     (5.3,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
     (27.5,  "DANCE_BEG_WAWE",             "Chorus 1",  "Gentle roll on G"),
     (30.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
