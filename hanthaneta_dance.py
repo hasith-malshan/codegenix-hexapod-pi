@@ -213,7 +213,7 @@ CHOREOGRAPHY = [
     (131.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
     (133.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
-    # ── VERSE 2 (2:22 – 3:00) ───────────────────────────────────────────
+    # ── VERSE 2 (2:22 – 3:00) TO DO ─────────────────────────────────────────── 
     (142.0, "DANCE_TWIST",            "Verse 2",   "Latha madulu — C"),
     (145.5, "DANCE_CIRCLE",           "Verse 2",   "Atha wanawi — Em, circle"),
     (149.0, "DANCE_RIPPLE_2",         "Verse 2",   "Epa ahaka — Am"),
