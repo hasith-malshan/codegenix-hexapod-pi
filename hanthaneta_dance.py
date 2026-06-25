@@ -149,7 +149,7 @@ CHOREOGRAPHY = [
     #(2.5,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
     #(4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
     #(5.5,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
-    (6.0,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
+    #(6.0,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
     (6.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
     (31.5,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
     (33.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
