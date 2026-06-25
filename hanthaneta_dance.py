@@ -151,7 +151,7 @@ CHOREOGRAPHY = [
     #(5.5,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
     (7.0,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
     #(6.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
-    (12.0,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
+    #(12.0,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
     (14.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
     (35.5,  "DANCE_PITCH_PIVOT",           "Chorus 1",  "Ripple through — G7"),
     (37.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
