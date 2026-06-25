@@ -136,31 +136,31 @@ def _resolve_send_fn():
 
 CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
-  ##  (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
    # (3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
-  ##  (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-  ##  (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-  ##  (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
     #21.5
-    (0.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
     #(2.5,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
     #(4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
     #(5.5,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
-    (7.0,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
+    (28.5,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
     #(6.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
     #(12.0,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
-    (14.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
-    (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
+    (36.0,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (43.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
     #(21.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
-    (24.0,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    (45.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
     #(26.5,  "DANCE_BELLY_CRAWL",           "Chorus 1",  "Moonlight ripple — C"),
     #(25.0,  "DANCE_PITCH_PIVOT",             "Chorus 1",  "Bridge into verse"),
     #(29.0,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
-    (28.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
-    (29.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (49.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
+    (51.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
     (53.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
