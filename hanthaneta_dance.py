@@ -160,7 +160,7 @@ CHOREOGRAPHY = [
     #(25.0,  "DANCE_PITCH_PIVOT",             "Chorus 1",  "Bridge into verse"),
     #(29.0,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
     (28.0,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
-    (51.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (29.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
     # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
     (53.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
