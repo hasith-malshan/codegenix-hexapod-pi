@@ -169,7 +169,7 @@ CHOREOGRAPHY = [
     ##(67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
     ##(74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
     #82.0
-    (0.0,  "DANCE_ROLL_SLOW",           "Verse 1",   "Em again — light spin"),
+    (82.0,  "DANCE_ROLL_SLOW",           "Verse 1",   "Em again — light spin"),
     #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
     #90.0
     ##(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
@@ -179,10 +179,10 @@ CHOREOGRAPHY = [
 
     # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
     #92.0
-    (7.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
-    (13.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (13.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
-    (21.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    (89.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (95.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (95.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (103.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
     #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
     #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
     #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
@@ -190,7 +190,7 @@ CHOREOGRAPHY = [
     #(105.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
 
     # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
-    (110.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+    (109.0, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
     (113.0, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
     (116.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
     (119.5, "DANCE_RIPPLE",           "Chorus 2",  "C — cascade"),
