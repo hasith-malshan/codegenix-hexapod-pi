@@ -149,7 +149,7 @@ CHOREOGRAPHY = [
 
 
 #9.9
-    (17.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"), #0.0
+    (10.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"), #0.0 #17.0
     #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
     (26.3,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"), #9.3
     (27.3,   "DANCE_WAVE",  "Intro",     "Rest, breathe on G"), #10.3
