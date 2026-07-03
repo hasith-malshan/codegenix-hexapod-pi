@@ -135,87 +135,105 @@ def _resolve_send_fn():
 # ---------------------------------------------------------------------------
 
 CHOREOGRAPHY = [
-    # ── INTRO (0:00 – 0:15) ──────────────────────────────────────────────
-    (0.00,   "DANCE_WAWE", "Intro",      "Moody hold — Am"),
-    (5.00,   "DANCE_WAVE",            "Intro",      "Build — F"),
-    (8.00,   "DANCE_RIPPLE",           "Intro",      "Pulse hit — C"),
-    (12.00,  "DANCE_RIPPLE",          "Intro",      "Flash into chorus — G"),
+    # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
+    (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
+    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
-    # ── CHORUS 1 (0:15 – 0:45) — "El Rey / La mano arriba" ────────────────
-    # (14.88,  "DANCE_TWIST",           "Chorus 1",   "La mano arriba — Am"),
-    # (18.60,  "DANCE_SALSA",           "Chorus 1",   "Cintura sola — F"),
-    # (22.33,  "DANCE_CIRCLE",          "Chorus 1",   "Da media vuelta — C"),
-    # (26.05,  "DANCE_PEACOCK",         "Chorus 1",   "Danza Kuduro! — G"),
-    # (29.77,  "DANCE_HEADBANG",        "Chorus 1",   "No te canses ahora — Am"),
-    # (33.49,  "DANCE_SALSA",           "Chorus 1",   "Que esto solo empieza — F"),
-    # (37.21,  "DANCE_CRAWL",           "Chorus 1",   "Mueve la cabeza — C"),
-    # (40.93,  "DANCE_PEACOCK",         "Chorus 1",   "Danza Kuduro! — G"),
+    # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
+    (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    #(2.5,  "DANCE_CHASSIS_BREATHE",      "Chorus 1",  "Swaying look up to the moon — Am"),
+    #(4.0,  "DANCE_ROLL_SLOW",          "Chorus 1",  "Open up, display — F"),
+    #(5.5,  "DANCE_PEACOCK",           "Chorus 1",  "Cascade back — C"),
+    (28.5,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
+    #(6.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
+    #(12.0,  "DANCE_HEADBANG",             "Chorus 1",  "Chorus resolve — C"),
+    (36.0,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (43.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
+    #(21.5,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (45.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    #(26.5,  "DANCE_BELLY_CRAWL",           "Chorus 1",  "Moonlight ripple — C"),
+    #(25.0,  "DANCE_PITCH_PIVOT",             "Chorus 1",  "Bridge into verse"),
+    #(29.0,  "DANCE_PEACOCK",          "Chorus 1",  "Open up, display — F"),
+    (49.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
+    (51.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
-    # # ── VERSE 1 (0:45 – 1:15) — "Quien puede domar..." ────────────────────
-    # (44.65,  "DANCE_ROLL_SLOW",       "Verse 1",    "Quien puede domar la fuerza del mal — Am"),
-    # (48.37,  "DANCE_RIPPLE",          "Verse 1",    "que se mete por tus venas — F"),
-    # (52.09,  "DANCE_PITCH_PIVOT",     "Verse 1",    "Lo caliente del sol — C"),
-    # (55.81,  "DANCE_WAVE",            "Verse 1",    "no te deja quieta, nena — G"),
-    # (59.53,  "DANCE_TWIST",           "Verse 1",    "Quien puede parar eso — Am"),
-    # (63.26,  "DANCE_CIRCLE",          "Verse 1",    "descontrola tus caderas — F"),
-    # (66.98,  "DANCE_RIPPLE_2",        "Verse 1",    "ese fuego que quema — C"),
-    # (70.70,  "DANCE_STROBE",          "Verse 1",    "te convierte en fiera — G"),
+    # ── VERSE 1 (0:52 – 1:30) ───────────────────────────────────────────
+    #53.0
+    (53.0,  "DANCE_TWIST",            "Verse 1",   "Anduru lala — C, light twist"),
+   # (8.5,  "DANCE_BEG_WAVE",           "Verse 1",   "Wahina kala — Em, small circle"),
+    (61.0,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Sarasawi bima — Am, ripple 2"),
+    (67.0,  "DANCE_ROLL_SLOW",             "Verse 1",   "Themenna — F→C, gentle wave"),
+    (74.0,  "DANCE_TWIST",            "Verse 1",   "Repeat — C"),
+    #82.0
+    (82.0,  "DANCE_ROLL_SLOW",           "Verse 1",   "Em again — light spin"),
+    #(90.0,  "DANCE_PEACOCK",           "Verse 1",   "Am flows"),
+    #90.0
+    ####(0.0,  "DANCE_ROLL_SLOW",      "Verse 1",   "Kude yatin — G→G7, look up"),
+    #(46.5,  "DANCE_PITCH_PIVOT",         "Verse 1",   "Epa thaniya — C→G, pleading beg"),
+    #(85.0,  "DANCE_PEACOCK",          "Verse 1",   "Denenna — C resolve, open display"),
+    #(89.0,  "DANCE_CHASSIS_BREATHE",  "Verse 1",   "Settle before inter"),
 
-    # # ── CHORUS 2 (1:14 – 1:29) — shorter, single pass ──────────────────────
-    # (74.42,  "DANCE_TWIST",           "Chorus 2",   "Con la mano arriba — Am"),
-    # (78.14,  "DANCE_SALSA",           "Chorus 2",   "Cintura sola — F"),
-    # (81.86,  "DANCE_CIRCLE",          "Chorus 2",   "Da media vuelta, sacude duro — C"),
-    # (85.58,  "DANCE_PEACOCK",         "Chorus 2",   "Mueve la cabeza — G"),
+    # ── INTER / BRIDGE (1:30 – 1:50) ────────────────────────────────────
+    #92.0
+    (89.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    (95.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (95.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    #103.5
+    (103.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    #(92.0,  "DANCE_WAVE",             "Inter",     "Inter C"),
+    #(92.3,  "DANCE_PITCH_PIVOT",         "Inter",     "Inter Am"),
+    #(94.0, "DANCE_CHASSIS_BREATHE",  "Inter",     "Inter F — breathe"),
+    #(98.0, "DANCE_PEACOCK",          "Inter",     "Inter G — hold display"),
+    #(105.0, "DANCE_RIPPLE",           "Inter",     "Dm→G7 — ripple leading to chorus"),
 
-    # # ── VERSE 2 / Portuguese (1:29 – 1:44) — "Balancar que e uma loucura" ─
-    # (89.30,  "DANCE_HEADBANG",        "Verse 2",    "Balançar que é uma loucura — Am"),
-    # (93.02,  "DANCE_CRAWL",           "Verse 2",    "Morena vem o meu lado — F"),
-    # (96.74,  "DANCE_PULSE",           "Verse 2",    "Ninguém vai ficar parado — C"),
-    # (100.46, "DANCE_ROLL_SLOW",       "Verse 2",    "Quero ver mexe cú duro — G"),
+    # ── CHORUS 2 (1:50 – 2:22) ──────────────────────────────────────────
+    #109.0
+    #(5.5, "DANCE_SALSA",            "Chorus 2",  "Bigger! C — salsa burst"),
+    #(9.5, "DANCE_PITCH_PIVOT",      "Chorus 2",  "Am — dramatic sway"),
+    #(17.5, "DANCE_ROLL",             "Chorus 2",  "F — smooth roll"),
+    #(119.5, "DANCE_PEOCOCK",           "Chorus 2",  "C — cascade"),
+    #(122.5, "DANCE_CHASSIS_BREATH",         "Chorus 2",  "G — emotional head nod"),
+    #(125.5, "DANCE_SALSA",            "Chorus 2",  "G7 — energy salsa"),
+    #(128.5, "DANCE_PEACOCK",          "Chorus 2",  "C — full proud display"),
+    #(131.5, "DANCE_TWIST",            "Chorus 2",  "G — spinning twist"),
+    #(134.5, "DANCE_ROLL_SLOW",        "Chorus 2",  "G7 — quick spin"),
+    #(137.5, "DANCE_ROLL",           "Chorus 2",  "C — waterfall ripple"),
+    #(141.0, "DANCE_SALSA",            "Chorus 2",  "High energy — bridge to verse 2"),
 
-    # # ── PRE-CHORUS 1 (1:44 – 1:59) — "Oi, oi, oi" ──────────────────────────
-    # (104.18, "DANCE_STROBE",          "Pre-chorus 1", "Oi, oi, oi, oi-oi, oi, oi — Am"),
-    # (107.90, "DANCE_PULSE",           "Pre-chorus 1", "Oi, oi, oi, oi-oi, oi, oi — F"),
-    # (111.63, "DANCE_TWIST",           "Pre-chorus 1", "Vem para quebrar kuduro — C"),
-    # (115.35, "DANCE_PEACOCK",         "Pre-chorus 1", "vamos dançar, Kuduro — G"),
+#5.5   #21.5
+    (109.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
+    (110.5,  "DANCE_CHASSIS_BREATHE",             "Chorus 1",  "Gentle roll on G"),
+    (118.0,  "DANCE_PEACOCK",          "Chorus 1",  "Full display — G"),
+    (125.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Ripple through — G7"),
+    (127.5,  "DANCE_CHASSIS_BREATHE",  "Chorus 1",  "Breathe out — C resolve"),
+    (131.5,  "DANCE_PITCH_PIVOT",      "Chorus 1",  "Lean and return — G7"),
+    (133.0,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
 
-    # # ── CHORUS 3 (1:59 – 2:29) — big one, "(oi) La mano arriba" ───────────
-    # (119.07, "DANCE_STROBE",          "Chorus 3",   "(oi) La mano arriba — Am"),
-    # (122.79, "DANCE_SALSA",           "Chorus 3",   "Cintura sola — F"),
-    # (126.51, "DANCE_CIRCLE",          "Chorus 3",   "Da media vuelta — C"),
-    # (130.23, "DANCE_PEACOCK",         "Chorus 3",   "Danza Kuduro! — G"),
-    # (133.95, "DANCE_HEADBANG",        "Chorus 3",   "No te canses ahora — Am"),
-    # (137.67, "DANCE_SALSA",           "Chorus 3",   "Que esto solo empieza — F"),
-    # (141.40, "DANCE_CRAWL",           "Chorus 3",   "Mueve la cabeza — C"),
-    # (145.12, "DANCE_PEACOCK",         "Chorus 3",   "Danza Kuduro! — G"),
+    # ── VERSE 2 (2:22 – 3:00) TO DO ─────────────────────────────────────────── 
+    (142.0, "DANCE_TWIST",            "Verse 2",   "Latha madulu — C"),
+    (145.5, "DANCE_CIRCLE",           "Verse 2",   "Atha wanawi — Em, circle"),
+    (149.0, "DANCE_RIPPLE_2",         "Verse 2",   "Epa ahaka — Am"),
+    (152.5, "DANCE_WAVE",             "Verse 2",   "Balanna — F→C"),
+    (156.5, "DANCE_TWIST",            "Verse 2",   "Repeat — C"),
+    (160.0, "DANCE_CIRCLE",           "Verse 2",   "Em"),
+    (163.5, "DANCE_PITCH_PIVOT",      "Verse 2",   "Maa geana — G, emotional sway"),
+    (167.5, "DANCE_HEADBANG",         "Verse 2",   "Mathakaya guli — G7, nodding"),
+    (171.5, "DANCE_PEACOCK",          "Verse 2",   "Maha weal — C, grand display"),
+    (175.5, "DANCE_SALSA",            "Verse 2",   "Iyata — G, rising"),
+    (179.5, "DANCE_RIPPLE",           "Verse 2",   "Damanna — C, flowing resolve"),
 
-    # # ── VERSE 3 / Portuguese repeat (2:29 – 2:44) ──────────────────────────
-    # (148.84, "DANCE_ROLL_SLOW",       "Verse 3",    "Balançar que é uma loucura — Am"),
-    # (152.56, "DANCE_RIPPLE",          "Verse 3",    "Morena vem o meu lado — F"),
-    # (156.28, "DANCE_RIPPLE_2",        "Verse 3",    "Ninguém vai ficar parado — C"),
-    # (160.00, "DANCE_CIRCLE",          "Verse 3",    "Quero ver mexer kuduro — G"),
-
-    # # ── PRE-CHORUS 2 (2:44 – 2:59) — "Oi, oi, oi" repeat ───────────────────
-    # (163.72, "DANCE_STROBE",          "Pre-chorus 2", "Oi, oi, oi, oi-oi, oi, oi — Am"),
-    # (167.44, "DANCE_PULSE",           "Pre-chorus 2", "Oi, oi, oi, oi-oi, oi, oi — F"),
-    # (171.16, "DANCE_TWIST",           "Pre-chorus 2", "Vem para quebrar kuduro — C"),
-    # (174.88, "DANCE_PEACOCK",         "Pre-chorus 2", "vamos dançar, Oi oi oi — G"),
-
-    # # ── CHORUS 4 / FINAL (2:59 – 3:29) — "(El Orfanato)" outro chorus ─────
-    # (178.60, "DANCE_STROBE",          "Chorus 4",   "(El Orfanato) La mano arriba — Am"),
-    # (182.33, "DANCE_SALSA",           "Chorus 4",   "Cintura sola — F"),
-    # (186.05, "DANCE_CIRCLE",          "Chorus 4",   "Da media vuelta — C"),
-    # (189.77, "DANCE_PEACOCK",         "Chorus 4",   "Danza Kuduro! — G"),
-    # (193.49, "DANCE_HEADBANG",        "Chorus 4",   "No te canses ahora — Am"),
-    # (197.21, "DANCE_SALSA",           "Chorus 4",   "Que esto solo empieza — F"),
-    # (200.93, "DANCE_CRAWL",           "Chorus 4",   "Mueve la cabeza — C"),
-    # (204.65, "DANCE_PEACOCK",         "Chorus 4",   "Danza Kuduro! (fade) — G"),
-
-    # # ── OUTRO ────────────────────────────────────────────────────────────
-    # (208.37, "DANCE_CHASSIS_BREATHE", "Outro",      "Settle, fade out"),
-    # (212.00, "STAND",                 "Outro",      "Song ends — stand still"),
+    # ── OUTRO / FADE (3:00 – end) ────────────────────────────────────────
+    (183.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Settle — C"),
+    (187.0, "DANCE_WAVE",             "Outro",     "Farewell wave — Am"),
+    (191.0, "DANCE_BEG_WAVE",         "Outro",     "Last moonlit beg — F"),
+    (196.0, "DANCE_PEACOCK",          "Outro",     "Final open display — G7→C"),
+    (201.0, "DANCE_CHASSIS_BREATHE",  "Outro",     "Breathe and rest"),
+    (208.0, "STAND",                  "Outro",     "Song ends — stand still"),
 ]
-
 
 # How long (seconds) to wait for READY after the final move before exiting.
 FINAL_READY_TIMEOUT = 8.0
