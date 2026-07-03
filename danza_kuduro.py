@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
 """
 =======================================================================
-  HEXABOT CHOREOGRAPHY — Danza Kuduro (ft. Lucenzo)
-  Artist  : Don Omar
-  BPM     : 129  |  Key : A minor  |  Beat interval : ~0.4651 s
+  HEXABOT CHOREOGRAPHY — හන්තානට පායන සඳ (Hanthanata Payana Sanda)
+  Artist  : Amarasiri Peiris
+  BPM     : 152  |  Key : C Major  |  Beat interval : ~0.395 s
 =======================================================================
 
 HOW TO USE:
   OPTION A — Standalone:
-        sudo python3 danza_kuduro_dance.py
+        sudo python3 hanthaneta_dance.py
 
   OPTION B — Start mid-song (e.g. 30 seconds in):
-        sudo python3 danza_kuduro_dance.py 30.0
+        sudo python3 hanthaneta_dance.py 30.0
 
-HOW SYNC WORKS:
-  Identical beat-locked, NO-ABORT, early-READY-accelerated engine as
-  hanthaneta_dance.py. See that file's header for the full rationale.
-  Short version: the song clock is master, every move has a hard
-  deadline (the next move's timestamp), and we NEVER send ABORT —
-  when the deadline hits mid-move we just send the next command and
-  let the ESP32 blend/crossfade from current servo positions.
+HOW SYNC WORKS (beat-locked, NO-ABORT, early-READY-accelerated):
+  The song clock is the master. Each move has a hard deadline — the
+  timestamp of the NEXT move.
 
-TIMING NOTE (IMPORTANT — READ BEFORE FIRST RUN):
-  Unlike hanthaneta_dance.py (which was hand-tuned against the actual
-  track), the timestamps below are ESTIMATED from the song's chord/
-  lyric structure at 129 BPM (beat = 0.4651s, bar = 1.8605s), snapped
-  to musical phrase boundaries (2-bar chord changes, 8/16-bar
-  sections). They are NOT verified against a waveform yet. Danza
-  Kuduro has several released edits with slightly different lengths
-  (~3:16 to ~3:56), so before a real run:
-    1. Play the exact YouTube/audio file you'll perform to.
-    2. Watch/listen for the chorus "La mano arriba" hits and compare
-       against the printed [elapsed] timestamps in the console log.
-    3. Nudge the CHOREOGRAPHY timestamps below to match — the same
-       way the commented-out alternates in hanthaneta_dance.py show
-       that file was iteratively tuned.
+  KEY CHANGES vs original:
+  ─────────────────────────
+  1. NO MORE ABORT:
+     When the deadline arrives while a move is still running, we do NOT
+     send ABORT. We simply send the NEXT command immediately. The ESP32
+     firmware should blend/crossfade from its current leg positions into
+     the new move. This eliminates the freeze+jerk/shake that ABORT caused.
 
-ESP32 FIRMWARE REQUIREMENT (same as hanthaneta):
-     • New command mid-move starts from CURRENT servo positions.
-     • No "wait for ABORT" gating before accepting the next command.
-     • Send READY when a motion naturally completes.
+  2. NO MORE MICRO-STOP ON READY:
+     When READY arrives early (move finished before the beat), we send the
+     next command immediately instead of waiting silently. The beat clock
+     shifts forward so the *following* deadline still lines up with its
+     correct song timestamp. The robot is always executing a motion.
+
+  ESP32 FIRMWARE REQUIREMENT:
+     • When a new command arrives mid-move, start the new motion from the
+       CURRENT servo positions (not from a neutral/home pose). Blend in.
+     • Remove any "wait for ABORT before accepting next command" logic.
+     • Send READY when the motion naturally completes.
 =======================================================================
 """
 
@@ -48,8 +44,7 @@ import threading
 import sys
 
 # ---------------------------------------------------------------------------
-# Serial / Send Setup  (identical to hanthaneta_dance.py — safe to share
-# hexabot_os.py's live connection, or run standalone)
+# Serial / Send Setup
 # ---------------------------------------------------------------------------
 
 _serial_obj = None
@@ -137,12 +132,6 @@ def _resolve_send_fn():
 # Choreography Timeline
 # ---------------------------------------------------------------------------
 # Each entry: (song_time_seconds, dance_command, section_label, note)
-#
-# Structure follows the chord sheet: Am–F–C–G looping, ~2 bars (3.72s)
-# per chord at 129 BPM. Fast/punchy moves (STROBE, PULSE, HEADBANG,
-# SALSA, TWIST, CRAWL) are reserved for choruses and pre-chorus "oi oi"
-# hits; verses lean into rolling/circling moves that still track tempo
-# but read as slightly more grounded between the big chorus hits.
 # ---------------------------------------------------------------------------
 
 CHOREOGRAPHY = [
@@ -227,18 +216,56 @@ CHOREOGRAPHY = [
     # (212.00, "STAND",                 "Outro",      "Song ends — stand still"),
 ]
 
+
 # How long (seconds) to wait for READY after the final move before exiting.
 FINAL_READY_TIMEOUT = 8.0
 
 # ---------------------------------------------------------------------------
-# Choreography Runner — identical beat-locked, NO-ABORT engine as
-# hanthaneta_dance.py. See that file for the full inline explanation.
+# Choreography Runner
 # ---------------------------------------------------------------------------
 
 _send_fn = None
 
 
 def run_choreography(start_offset: float = 0.0, send_fn=None):
+    """
+    Beat-locked choreography runner — NO ABORT, no micro-stops.
+
+    Timing strategy:
+    ─────────────────
+    For each move we know its song_time (when to start) and its deadline
+    (the next move's song_time). We:
+
+      1. Sleep until the move's beat arrives (first move only, or if we
+         are running on-schedule).
+
+      2. Send the command and clear _ready_event.
+
+      3. Wait for whichever comes first:
+           a. READY arrives early  → robot finished the move ahead of the
+                                     beat. Send the NEXT command immediately
+                                     (no silent freeze). Adjust song_start
+                                     so subsequent deadlines still align
+                                     with their correct song timestamps.
+           b. Deadline arrives     → robot is still moving. Send the NEXT
+                                     command immediately WITHOUT sending
+                                     ABORT first. The ESP32 firmware must
+                                     blend from its current positions into
+                                     the new move. No freeze, no shake.
+
+    Why no ABORT?
+    ─────────────
+    ABORT tells the ESP32 to freeze servo PWM. Even a 10 ms freeze is
+    visible as a jerk/shake. By sending the next dance command instead,
+    the servos transition directly from one motion to another, which the
+    firmware can interpolate smoothly.
+
+    Why send immediately on READY?
+    ────────────────────────────────
+    If we wait silently after READY, the robot holds a static pose until
+    the next beat — a visible micro-stop. Sending the next command
+    immediately keeps the robot in continuous motion.
+    """
     global _send_fn
     if send_fn:
         _send_fn = send_fn
@@ -246,8 +273,8 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
         _send_fn = _resolve_send_fn()
 
     print("\n" + "=" * 60)
-    print("  🎵 HEXABOT CHOREO — Danza Kuduro")
-    print("  🎸 Don Omar ft. Lucenzo | 129 BPM | A minor")
+    print("  🎵 HEXABOT CHOREO — හන්තානට පායන සඳ")
+    print("  🎸 Amarasiri Peiris | 152 BPM | C Major")
     print("=" * 60)
 
     pending = [(t, cmd, sec, note) for t, cmd, sec, note in CHOREOGRAPHY
@@ -270,6 +297,8 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
         song_time, command, section, note = pending[i]
 
         # ── Step 1: Sleep until this move's beat ─────────────────────────
+        # (On early-READY path we arrive here already past this beat,
+        #  so wait will be ≤ 0 and we skip the sleep immediately.)
         target_wall = song_start + song_time
         wait = target_wall - time.monotonic()
         if wait > 0:
@@ -306,12 +335,24 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
             got_ready = False   # already past deadline
 
         if got_ready:
+            # ── READY arrived early ───────────────────────────────────────
+            # Robot finished its move before the next beat. Send the next
+            # command NOW so there's zero pause. Re-anchor song_start so
+            # the beats beyond this one still line up with the song.
+            #
+            # We do NOT sleep — we jump straight to the top of the loop
+            # for move i+1, which will see wait ≤ 0 and skip its sleep.
             early_by = deadline_wall - time.monotonic()
-            if early_by > 0.02:
+            if early_by > 0.02:   # only log if meaningfully early
                 print(f"  ⚡ READY {early_by:.2f}s early — sending next move immediately")
-            # song_start is NOT adjusted — next iteration's wait goes
-            # negative and skips its sleep, keeping the song clock anchored.
+            # NOTE: song_start is NOT adjusted. We let the next iteration's
+            # wait calculation produce a negative value (≤ 0), which it
+            # handles by skipping the sleep. This keeps future deadlines
+            # correctly anchored to the song clock.
         else:
+            # ── Deadline arrived, move still running ──────────────────────
+            # DO NOT send ABORT. Fall through to the next iteration which
+            # will send the next command immediately (wait will be ≤ 0).
             elapsed_dbg = time.monotonic() - song_start
             print(f"  ⏭️  [{elapsed_dbg:6.1f}s] Deadline — blending into next move (no ABORT)")
 
@@ -324,7 +365,7 @@ def run_choreography(start_offset: float = 0.0, send_fn=None):
 # Entry Point (standalone)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("\n🎵 Danza Kuduro — Hexabot Choreography")
+    print("\n🎵 Hanthanata Payana Sanda — Hexabot Choreography")
     print("=" * 54)
 
     offset = 0.0
