@@ -136,14 +136,26 @@ def _resolve_send_fn():
 
 CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
-    (0.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"),
-    #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
-    (9.3,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (10.3,   "DANCE_WAVE",  "Intro",     "Rest, breathe on G"),
-    (11.5,  "DANCE_RIPPLE",          "Intro",     "Proud slow display on Am→G"),
-    (14.8,  "DANCE_RIPPLE_2",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
-    (23.5,  "DANCE_ROLL_FAST",             "Intro",     "Flow into pre-chorus on Dm→G7"),
+    (0.0,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Wake up — gentle sway on C"),
+    #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
+    (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (6.8,   "DANCE_CHASSIS_BREATHE",  "Intro",     "Rest, breathe on G"),
+    (14.5,  "DANCE_PEACOCK",          "Intro",     "Proud slow display on Am→G"),
+    #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
+
+
+
+
+
+    (17.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"), #0.0
+    #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
+    (26.3,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"), #9.3
+    (27.3,   "DANCE_WAVE",  "Intro",     "Rest, breathe on G"), #10.3
+    (28.5,  "DANCE_RIPPLE",          "Intro",     "Proud slow display on Am→G"),#11.5
+    (31.8,  "DANCE_RIPPLE_2",             "Intro",     "Flow into pre-chorus on Dm→G7"),#14.8
+
+    (40.5,  "DANCE_ROLL_FAST",             "Intro",     "Flow into pre-chorus on Dm→G7"),#23.5
 
     # ── CHORUS 1 (0:20 – 0:52) ──────────────────────────────────────────
 #     (21.5,  "DANCE_ROLL_SLOW",           "Chorus 1",  "Moonlight ripple — C"),
