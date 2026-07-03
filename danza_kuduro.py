@@ -140,7 +140,7 @@ CHOREOGRAPHY = [
     (0.0,   "DANCE_ROLL_FAST",  "Intro",     "Wake up — gentle sway on C"),
     #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
     #(1.5,   "DANCE_ROLL_FAST",             "Intro",     "Gentle ripple on F"),
-    (5.0,   "DANCE_ROLL_FAST",  "Intro",     "Rest, breathe on G"),
+    (3.5,   "DANCE_ROLL_FAST",  "Intro",     "Rest, breathe on G"),
    # (9.0,  "DANCE_ROLL_FAST",          "Intro",     "Proud slow display on Am→G"),
     #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
