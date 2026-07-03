@@ -136,7 +136,7 @@ def _resolve_send_fn():
 
 CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
-    (0.0,   "DANCE_HEAD_BANG",  "Intro",     "Wake up — gentle sway on C"),
+    (0.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"),
     #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
     (6.5,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
     (6.8,   "DANCE_RIPPLE",  "Intro",     "Rest, breathe on G"),
