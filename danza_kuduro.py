@@ -138,8 +138,8 @@ CHOREOGRAPHY = [
     # ── INTRO (0:00 – 0:20) ─────────────────────────────────────────────
     (0.0,   "DANCE_HEADBANG",  "Intro",     "Wake up — gentle sway on C"),
     #(3.5,   "DANCE_BEG_WAVE",         "Intro",     "Curious moon-gazing wave on Am"),
-    (9.0,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
-    (10.0,   "DANCE_WAVE",  "Intro",     "Rest, breathe on G"),
+    (9.3,   "DANCE_WAVE",             "Intro",     "Gentle ripple on F"),
+    (10.3,   "DANCE_WAVE",  "Intro",     "Rest, breathe on G"),
     #(14.5,  "DANCE_RIPPLE",          "Intro",     "Proud slow display on Am→G"),
     #(19.0,  "DANCE_WAVE",             "Intro",     "Flow into pre-chorus on Dm→G7"),
 
