@@ -167,6 +167,7 @@ class RobotState:
 
         self.body_roll = 0.0
         self.manual_led_pattern = None
+        self.manual_mood = None
 
         # Buffer-safe Handshake Architecture
         self.robot_ready = False
@@ -805,7 +806,8 @@ def display_loop():
     while True:
         try:
             with state.lock:
-                mood, va, cmd_t, bpm, syl, roll = state.mood, state.voice_active, state.command_detected_time, state.bpm, state.syllable_count, state.body_roll
+                effective_mood = state.manual_mood if state.manual_mood is not None else state.mood
+                mood, va, cmd_t, bpm, syl, roll = effective_mood, state.voice_active, state.command_detected_time, state.bpm, state.syllable_count, state.body_roll
                 beat_active = time.monotonic() - state.last_beat_time < 0.15
 
             dt = time.time() - cmd_t
@@ -820,7 +822,7 @@ def display_loop():
                 col, h, cy_r = (0, 0, 0), int(eye_h * 0.4), cy - 10
             elif dt < 1.0:
                 col, h, cy_r = (0, 191, 255), int(eye_h * 0.4), cy - 10
-            elif va:
+            elif va or mood == "VOICE_ACTIVE":
                 col, h = (0, 255, 100), int(eye_h * 0.75)
             elif mood == "AGGRESSIVE":
                 col, h = (255, 50, 50), eye_h + 20
@@ -828,18 +830,24 @@ def display_loop():
                 col, h = (255, 150, 50), eye_h + 10
             elif mood == "CHILL":
                 col, h = (150, 50, 255), int(eye_h * 0.6)
+            elif mood == "HAPPY":
+                col, h = (255, 220, 0), eye_h + 15
+            elif mood == "CONFUSED":
+                col, h = (255, 105, 180), eye_h
+
+            h_l, h_r = (h - 30, h + 20) if mood == "CONFUSED" else (h, h)
 
             ew = eye_w + 10 if (beat_active and not va and dt > 1.0) else eye_w
             if time.time() - blink_timer > blink_interval: is_blinking, blink_timer, blink_interval = True, time.time(), random.uniform(
                 2.0, 5.0)
-            if is_blinking and not va and dt > 1.0: h = 10; is_blinking = time.time() - blink_timer <= 0.15
+            if is_blinking and not va and dt > 1.0: h_l, h_r = 10, 10; is_blinking = time.time() - blink_timer <= 0.15
 
             roll_offset = int(roll * 1.5)
             draw_rounded_rect(draw,
-                              [lx - ew // 2, cy_r + roll_offset - h // 2, lx + ew // 2, cy_r + roll_offset + h // 2],
+                              [lx - ew // 2, cy_r + roll_offset - h_l // 2, lx + ew // 2, cy_r + roll_offset + h_l // 2],
                               20, col)
             draw_rounded_rect(draw,
-                              [rx - ew // 2, cy_r - roll_offset - h // 2, rx + ew // 2, cy_r - roll_offset + h // 2],
+                              [rx - ew // 2, cy_r - roll_offset - h_r // 2, rx + ew // 2, cy_r - roll_offset + h_r // 2],
                               20, col)
             display.image(img);
             time.sleep(0.03)
@@ -875,6 +883,33 @@ LED_PATTERNS = {
     59: "comet", 60: "dual_scanner", 61: "breathing", 62: "sparkle_burst",
     63: "strobe", 64: "wave", 65: "alternating", 66: "random_palette",
 }
+
+SCREEN_EMOTIONS = {
+    80: ("IDLE", "Cyan (Normal/Idle)"),
+    81: ("AGGRESSIVE", "Red (Aggressive/Angry)"),
+    82: ("ENERGY", "Orange (Energetic/Hyped)"),
+    83: ("CHILL", "Purple (Chill/Relaxed)"),
+    84: ("VOICE_ACTIVE", "Green (Listening/Voice)"),
+    85: ("HAPPY", "Yellow (Happy/Excited)"),
+    86: ("CONFUSED", "Pink (Confused/Asymmetric)"),
+}
+
+
+def run_emotion_screen_test():
+    """Cycles through all LCD screen emotion states with CLI status output."""
+    print("\n==================================================")
+    print("📺 STARTING AUTOMATED SCREEN EMOTION TEST CYCLE")
+    print("==================================================")
+    for num, (mood, desc) in SCREEN_EMOTIONS.items():
+        with state.lock:
+            state.manual_mood = mood
+        print(f"  [Option {num}] Displaying Emotion: {mood:12s} ({desc})")
+        time.sleep(2.5)
+
+    with state.lock:
+        state.manual_mood = None
+    print("--------------------------------------------------")
+    print("✅ Screen Emotion Test Complete! Reset to AUTO.\n")
 
 
 def print_mic_readings():
@@ -958,6 +993,13 @@ def print_menu():
   [66] Random Palette
   [69] RETURN LEDS TO AUTO MOOD SYNC
 
+ --- LCD SCREEN EMOTION OVERRIDES (80-89) ---
+  [80] Normal (Cyan)  [81] Aggressive (Red) [82] Energy (Orange)
+  [83] Chill (Purple) [84] Voice (Green)    [85] Happy (Yellow)
+  [86] Confused (Pink)
+  [88] RUN AUTOMATED SCREEN EMOTION TEST CYCLE (2.5s each)
+  [89] RETURN DISPLAY TO AUTO MOOD SYNC
+
  --- DIAGNOSTICS & SYSTEM ---
   [70] to [75] Test Individual Legs 0 through 5
   [91] Toggle Telemetry Logging      [92] Print Mic Reading Snapshot
@@ -988,6 +1030,17 @@ def manual_testing_loop():
                 with state.lock:
                     state.manual_led_pattern = None
                 print("🎵 LEDs returned to AUTO MOOD SYNC mode.")
+            elif number in SCREEN_EMOTIONS:
+                mood_key, desc = SCREEN_EMOTIONS[number]
+                with state.lock:
+                    state.manual_mood = mood_key
+                print(f"📺 Display Emotion Overridden to: {mood_key} ({desc})")
+            elif number == 88:
+                run_emotion_screen_test()
+            elif number == 89:
+                with state.lock:
+                    state.manual_mood = None
+                print("📺 LCD Screen returned to AUTO MOOD SYNC mode.")
             elif number == 91:
                 with state.lock:
                     state.show_audio_logs = not state.show_audio_logs
