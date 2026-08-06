@@ -158,6 +158,8 @@ class RobotState:
         self.mood = "IDLE"
         self.genre = "Listening..."
         self.audio_context = "Listening..."
+        self.rms_db = -60.0
+        self.peak_amplitude = 0.0
 
         self.voice_active = False
         self.command_detected_time = 0.0
@@ -354,6 +356,11 @@ class AdaptiveMusicAnalyzer:
 
         rms = float(np.sqrt(np.mean(chunk * chunk) + 1e-12))
         rms_db = 20.0 * math.log10(max(rms, 1e-6))
+        peak = float(np.max(np.abs(chunk)))
+
+        with state.lock:
+            state.rms_db = rms_db
+            state.peak_amplitude = peak
 
         if len(self.flux_history) >= 20:
             recent = np.asarray(list(self.flux_history)[-120:], dtype=np.float32)
@@ -870,6 +877,59 @@ LED_PATTERNS = {
 }
 
 
+def print_mic_readings():
+    """Prints a single real-time snapshot of microphone readings to the CLI."""
+    with state.lock:
+        rms_db = state.rms_db
+        peak = state.peak_amplitude
+        bpm = state.bpm
+        syl = state.syllable_count
+        mood = state.mood
+        energy = state.energy_level
+        activity = state.activity_level
+        ctx = state.audio_context
+
+    # Visual VU meter bar based on RMS dB (-60 dB to 0 dB)
+    normalized_val = max(0, min(30, int((rms_db + 60) / 2)))
+    vu_bar = "[" + "#" * normalized_val + "-" * (30 - normalized_val) + "]"
+
+    print("\n--------------------------------------------------")
+    print("🎙️ LIVE MICROPHONE READINGS SNAPSHOT")
+    print("--------------------------------------------------")
+    print(f"  Volume (RMS) : {rms_db:6.1f} dB  {vu_bar}")
+    print(f"  Peak Signal  : {peak:6.3f}")
+    print(f"  Estimated BPM: {bpm:5.1f} BPM")
+    print(f"  Speech/Syll  : {syl} syllables / 3s")
+    print(f"  Energy Level : {energy} | Activity: {activity} | Mood: {mood}")
+    print(f"  Audio Context: {ctx}")
+    print("--------------------------------------------------\n")
+
+
+def stream_mic_readings(duration_sec: float = 10.0):
+    """Streams live microphone VU meter and telemetry directly in the CLI for N seconds."""
+    print("\n🎙️ Streaming Live Microphone Readings (Press Ctrl+C to stop early)...")
+    end_time = time.time() + duration_sec
+    try:
+        while time.time() < end_time:
+            with state.lock:
+                rms_db = state.rms_db
+                peak = state.peak_amplitude
+                bpm = state.bpm
+                syl = state.syllable_count
+                mood = state.mood
+
+            normalized_val = max(0, min(20, int((rms_db + 60) / 3)))
+            vu_bar = "#" * normalized_val + "-" * (20 - normalized_val)
+            sys.stdout.write(
+                f"\r🎙️ [{vu_bar}] RMS:{rms_db:5.1f}dB | Peak:{peak:.2f} | BPM:{bpm:5.1f} | Syl:{syl} | Mood:{mood}  "
+            )
+            sys.stdout.flush()
+            time.sleep(0.1)
+        print("\n✅ Stream completed.\n")
+    except KeyboardInterrupt:
+        print("\n🛑 Stream stopped.\n")
+
+
 def print_menu():
     print("""
 ======================================================================
@@ -900,7 +960,8 @@ def print_menu():
 
  --- DIAGNOSTICS & SYSTEM ---
   [70] to [75] Test Individual Legs 0 through 5
-  [91] Toggle Telemetry Logging      [ 0] EXIT PROGRAM
+  [91] Toggle Telemetry Logging      [92] Print Mic Reading Snapshot
+  [93] Live Mic VU Stream (10s)      [ 0] EXIT PROGRAM
 ======================================================================
 """)
 
@@ -931,6 +992,10 @@ def manual_testing_loop():
                 with state.lock:
                     state.show_audio_logs = not state.show_audio_logs
                 print(f"📁 Background Audio Logging: {'ON' if state.show_audio_logs else 'OFF'} (Check hexabot.log)")
+            elif number == 92:
+                print_mic_readings()
+            elif number == 93:
+                stream_mic_readings(duration_sec=10.0)
             else:
                 print("Invalid command.")
         except KeyboardInterrupt:
