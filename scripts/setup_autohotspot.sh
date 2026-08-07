@@ -19,11 +19,11 @@ echo "[2/4] Creating the Hotspot Profile..."
 # Create the hotspot with WPA2 security and the IP 10.42.0.1
 nmcli con add type wifi ifname wlan0 mode ap con-name Hexapod-AP ssid Hexapod-AP ipv4.method shared ipv4.addresses 10.42.0.1/24 wifi-sec.key-mgmt wpa-psk wifi-sec.psk "hexapod123"
 
-echo "[3/4] Configuring Auto-Fallback Behavior..."
-# Set autoconnect to yes, but priority to -10 (very low).
-# This ensures it ONLY activates if home Wi-Fi networks (which default to priority 0) are unavailable.
+echo "[3/4] Configuring Always-On Hotspot..."
+# Set autoconnect to yes, and priority to 999 (highest).
+# This ensures the Pi ALWAYS broadcasts the hotspot on boot, ignoring saved networks.
 nmcli con modify Hexapod-AP connection.autoconnect yes
-nmcli con modify Hexapod-AP connection.autoconnect-priority -10
+nmcli con modify Hexapod-AP connection.autoconnect-priority 999
 
 echo "[4/4] Restarting NetworkManager to apply changes..."
 systemctl restart NetworkManager
