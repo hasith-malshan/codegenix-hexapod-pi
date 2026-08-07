@@ -43,8 +43,16 @@ class WifiService:
         logger.info(f"Connecting to {ssid}...")
         
         try:
+            # First, try to delete any broken saved profiles for this SSID so we get a clean slate
+            await asyncio.create_subprocess_exec(
+                "sudo", "nmcli", "con", "delete", ssid,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            
+            # Now run the connection command with sudo
             process = await asyncio.create_subprocess_exec(
-                "nmcli", "dev", "wifi", "connect", ssid, "password", password,
+                "sudo", "nmcli", "dev", "wifi", "connect", ssid, "password", password,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
