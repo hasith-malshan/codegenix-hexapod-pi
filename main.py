@@ -22,6 +22,18 @@ app.add_middleware(
 app.include_router(endpoints.router, prefix="/api")
 app.include_router(websocket.router, prefix="/api")
 
+import asyncio
+from app.services.ble_service import ble_service
+
+@app.on_event("startup")
+async def startup_event():
+    # Start BLE Provisioning Service
+    asyncio.create_task(ble_service.start())
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await ble_service.stop()
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Hexapod RPi Central API Server"}
